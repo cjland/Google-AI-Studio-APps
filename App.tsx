@@ -20,7 +20,7 @@ import { parseCSV, formatDuration, generatePDFDoc, generateTimeOptions, parseDur
 import { SongLibrary } from './components/SongLibrary';
 import { SetListColumn } from './components/SetListColumn';
 import { Icons } from './components/ui/Icons';
-import { loadBootstrap, saveState, getGigs, createGig, updateGig, deleteGig, checkHealth, checkEnv, getDiagnostics } from './src/services/api';
+import { loadBootstrap, saveState, getGigs, createGig, updateGig, deleteGig, checkHealth, checkEnv, getDiagnostics, ApiRequestError } from './src/services/api';
 import { useDatabaseHealth } from './src/hooks/useDatabaseHealth';
 import { DatabaseHealthBadge } from './src/components/DatabaseHealthBadge';
 
@@ -672,6 +672,31 @@ export default function App() {
     stage?: string;
     code?: string;
   } | null>(null);
+
+  interface BootstrapFailure {
+    httpStatus?: number;
+    requestId?: string | null;
+    stage?: string | null;
+    code?: string | null;
+    message?: string | null;
+    detail?: string | null;
+    error?: string | null;
+    databaseTable?: string | null;
+    databaseColumn?: string | null;
+    databaseConstraint?: string | null;
+  }
+
+  const [bootstrapFailure, setBootstrapFailure] = useState<BootstrapFailure | null>(null);
+
+  interface BootstrapTestResult {
+    httpStatus?: number;
+    ok?: boolean;
+    body?: any;
+  }
+
+  const [bootstrapTestResult, setBootstrapTestResult] = useState<BootstrapTestResult | null>(null);
+  const [testingBootstrap, setTestingBootstrap] = useState(false);
+  const [copiedDiagnostics, setCopiedDiagnostics] = useState(false);
   const [diagnosticResult, setDiagnosticResult] = useState<any>(null);
   const [diagnosticTitle, setDiagnosticTitle] = useState<string>('');
   const [diagnosticOpen, setDiagnosticOpen] = useState(false);
@@ -758,6 +783,7 @@ export default function App() {
         setSets([]);
       }
 
+      setBootstrapFailure(null);
       setIsDirty(false);
       setAutosaveStatus('saved');
       setIsInitialized(true);
@@ -766,10 +792,29 @@ export default function App() {
       setErrorState({
         message: 'Unable to load setlist data from Neon',
         detail: err.message || 'Database connection error',
-        requestId: err.data?.requestId || err.requestId,
-        stage: err.data?.stage || err.stage,
-        code: err.data?.code || err.code
+        requestId: err.payload?.requestId || err.data?.requestId || err.requestId,
+        stage: err.payload?.stage || err.data?.stage || err.stage,
+        code: err.payload?.code || err.data?.code || err.code
       });
+
+      if (err instanceof ApiRequestError) {
+        setBootstrapFailure({
+          httpStatus: err.status,
+          requestId: err.payload?.requestId ?? null,
+          stage: err.payload?.stage ?? null,
+          code: err.payload?.code ?? null,
+          message: err.payload?.message ?? err.message,
+          detail: err.payload?.detail ?? null,
+          error: err.payload?.error ?? null,
+          databaseTable: err.payload?.databaseTable ?? null,
+          databaseColumn: err.payload?.databaseColumn ?? null,
+          databaseConstraint: err.payload?.databaseConstraint ?? null
+        });
+      } else {
+        setBootstrapFailure({
+          message: err instanceof Error ? err.message : 'Unknown bootstrap error'
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -1439,20 +1484,22 @@ export default function App() {
   // Render Bootstrap Failure Error Panel
   if (errorState) {
     const handleCheckEnv = async () => {
-      setDiagnosticTitle('Environment Check');
+      setDiagnosticTitle('Environment & Health Check');
       setDiagnosticOpen(true);
       try {
-        const res = await checkEnv();
+        const res = await checkHealth();
         setDiagnosticResult(res);
-        if (res.databaseUrlPresent === false) {
+        if (res?.ok && res.databaseUrlPresent) {
+          setInterpretation('DATABASE_URL is detected and the Neon connection works.');
+        } else if (res?.databaseUrlPresent === false) {
           setInterpretation('DATABASE_URL is not available to this Vercel deployment. Confirm the variable is enabled for this deployment’s environment and redeploy.');
         } else {
-          setInterpretation('DATABASE_URL is present in the environment.');
+          setInterpretation('DATABASE_URL is present, but Neon connection failed.');
         }
       } catch (e: any) {
-        const errorData = e.data || { error: e.message };
+        const errorData = e.payload || e.data || { error: e.message };
         setDiagnosticResult(errorData);
-        setInterpretation('Failed to run environment check API. ' + e.message);
+        setInterpretation('Failed to run health check. ' + e.message);
       }
     };
 
@@ -1468,7 +1515,7 @@ export default function App() {
           setInterpretation('Vercel can see DATABASE_URL, but Neon rejected or could not complete the connection.');
         }
       } catch (e: any) {
-        const errorData = e.data || { error: e.message };
+        const errorData = e.payload || e.data || { error: e.message };
         setDiagnosticResult(errorData);
         setInterpretation('Vercel can see DATABASE_URL, but Neon rejected or could not complete the connection.');
       }
@@ -1486,13 +1533,86 @@ export default function App() {
           setInterpretation('Vercel can see DATABASE_URL, but Neon rejected or could not complete the connection.');
         }
       } catch (e: any) {
-        const errorData = e.data || { error: e.message };
+        const errorData = e.payload || e.data || { error: e.message };
         setDiagnosticResult(errorData);
         if (errorData.stage) {
           setInterpretation('The Neon connection works. The bootstrap query failed at the displayed stage.');
         } else {
           setInterpretation('Vercel can see DATABASE_URL, but Neon rejected or could not complete the connection.');
         }
+      }
+    };
+
+    const handleCopyDiagnostics = () => {
+      const dbHealthStatus = databaseHealth.status || 'unknown';
+      const isDbUrlPresent = databaseHealth.health?.databaseUrlPresent !== false ? 'yes' : 'no';
+      const httpStatus = bootstrapFailure?.httpStatus || '500';
+      const requestId = bootstrapFailure?.requestId || errorState?.requestId || 'N/A';
+      const stage = bootstrapFailure?.stage || errorState?.stage || 'Unknown';
+      const code = bootstrapFailure?.code || errorState?.code || 'Unknown';
+      const message = bootstrapFailure?.message || errorState?.message || 'None';
+      const detail = bootstrapFailure?.detail || errorState?.detail || 'None';
+      const deploymentId = databaseHealth.health?.deploymentId || 'Unknown';
+
+      const text = `SetList Bootstrap Failure
+Database health: ${dbHealthStatus}
+DATABASE_URL detected: ${isDbUrlPresent}
+HTTP status: ${httpStatus}
+Request ID: ${requestId}
+Stage: ${stage}
+PostgreSQL code: ${code}
+Message: ${message}
+Detail: ${detail}
+Deployment ID: ${deploymentId}`;
+
+      navigator.clipboard.writeText(text).then(() => {
+        setCopiedDiagnostics(true);
+        setTimeout(() => setCopiedDiagnostics(false), 2000);
+      });
+    };
+
+    const testBootstrapApi = async () => {
+      setTestingBootstrap(true);
+      setDiagnosticTitle('Direct Bootstrap API Test');
+      setDiagnosticOpen(true);
+      try {
+        const response = await fetch('/api/bootstrap', {
+          cache: 'no-store'
+        });
+
+        const text = await response.text();
+
+        let body: unknown;
+
+        try {
+          body = JSON.parse(text);
+        } catch {
+          body = {
+            rawResponse: text
+          };
+        }
+
+        setBootstrapTestResult({
+          httpStatus: response.status,
+          ok: response.ok,
+          body
+        });
+        setDiagnosticResult(body);
+        if (response.ok) {
+          setInterpretation('Direct bootstrap test succeeded. The API endpoints returned active data.');
+        } else {
+          setInterpretation('Direct bootstrap test failed with status ' + response.status + '. The API encountered a database or runtime error.');
+        }
+      } catch (e: any) {
+        const errorData = { error: e.message };
+        setBootstrapTestResult({
+          ok: false,
+          body: errorData
+        });
+        setDiagnosticResult(errorData);
+        setInterpretation('Direct bootstrap test failed to reach the server. ' + e.message);
+      } finally {
+        setTestingBootstrap(false);
       }
     };
 
@@ -1521,37 +1641,90 @@ export default function App() {
           {healthStatusMessage}
         </p>
 
+        {/* Connection & Bootstrap Status Header Panel */}
+        <div className="mb-4 p-4 bg-zinc-900/50 border border-zinc-800 rounded-lg max-w-lg text-left w-full space-y-2 text-xs">
+          <div className="flex justify-between">
+            <span className="text-zinc-500 font-mono">Database Status:</span>
+            <span className={`font-semibold font-mono ${
+              databaseHealth.status === 'connected' ? 'text-emerald-400' :
+              databaseHealth.status === 'connection-failed' ? 'text-rose-400' : 'text-amber-400'
+            }`}>
+              {databaseHealth.status === 'connected' ? 'Connected' :
+               databaseHealth.status === 'connection-failed' ? 'Connection Failed' : 'Not Detected'}
+            </span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-zinc-500 font-mono">DATABASE_URL:</span>
+            <span className="font-semibold font-mono text-zinc-200">
+              {databaseHealth.health?.databaseUrlPresent !== false ? 'Detected' : 'Not Detected'}
+            </span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-zinc-500 font-mono">Bootstrap Status:</span>
+            <span className="font-semibold font-mono text-rose-400">Failed</span>
+          </div>
+        </div>
+
         {/* Diagnostic Metadata Grid */}
         <div className="mb-6 p-4 bg-zinc-950 border border-zinc-800 rounded-lg max-w-lg text-left w-full space-y-2 text-xs">
           <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2">Diagnostic Identifiers</h3>
-          {databaseHealth.health?.requestId && (
-            <div className="flex justify-between font-mono">
-              <span className="text-zinc-500">Health Check Request ID:</span>
-              <span className="text-zinc-300 select-all">{databaseHealth.health.requestId}</span>
-            </div>
-          )}
-          {errorState.requestId && (
-            <div className="flex justify-between font-mono">
-              <span className="text-zinc-500">Bootstrap Request ID:</span>
-              <span className="text-zinc-300 select-all">{errorState.requestId}</span>
-            </div>
-          )}
-          {errorState.stage && (
-            <div className="flex justify-between">
-              <span className="text-zinc-500">Bootstrap Stage:</span>
-              <span className="text-zinc-300 font-semibold">{errorState.stage}</span>
-            </div>
-          )}
-          {(errorState.code || databaseHealth.health?.code) && (
-            <div className="flex justify-between font-mono">
-              <span className="text-zinc-500">PostgreSQL Code:</span>
-              <span className="text-zinc-300 font-semibold">{errorState.code || databaseHealth.health?.code}</span>
-            </div>
-          )}
+          
           <div className="flex justify-between font-mono">
-            <span className="text-zinc-500">HTTP Detail:</span>
-            <span className="text-zinc-400 truncate max-w-xs">{errorState.detail}</span>
+            <span className="text-zinc-500">HTTP Status:</span>
+            <span className="text-zinc-300 font-semibold">{bootstrapFailure?.httpStatus || '500'}</span>
           </div>
+
+          <div className="flex justify-between font-mono">
+            <span className="text-zinc-500">Failing Stage:</span>
+            <span className="text-amber-400 font-semibold">{bootstrapFailure?.stage || errorState?.stage || 'Unknown'}</span>
+          </div>
+
+          <div className="flex justify-between font-mono">
+            <span className="text-zinc-500">PostgreSQL Code:</span>
+            <span className="text-zinc-300 font-semibold">{bootstrapFailure?.code || errorState?.code || 'Unknown'}</span>
+          </div>
+
+          <div className="flex justify-between font-mono">
+            <span className="text-zinc-500">Bootstrap Request ID:</span>
+            <span className="text-zinc-300 select-all">{bootstrapFailure?.requestId || errorState?.requestId || 'N/A'}</span>
+          </div>
+
+          <div className="flex flex-col gap-1 border-t border-zinc-900 pt-2 mt-2 font-mono">
+            <span className="text-zinc-500">Database Message:</span>
+            <span className="text-zinc-200 bg-black/40 p-2 rounded border border-zinc-900 whitespace-pre-wrap break-all select-all font-sans text-xs">
+              {bootstrapFailure?.message || errorState?.message || 'None'}
+            </span>
+          </div>
+
+          {(bootstrapFailure?.detail || errorState?.detail) && (
+            <div className="flex flex-col gap-1 font-mono">
+              <span className="text-zinc-500">Database Detail:</span>
+              <span className="text-zinc-300 bg-black/40 p-2 rounded border border-zinc-900 whitespace-pre-wrap break-all select-all font-sans text-xs">
+                {bootstrapFailure?.detail || errorState?.detail}
+              </span>
+            </div>
+          )}
+
+          {bootstrapFailure?.databaseTable && (
+            <div className="flex justify-between font-mono">
+              <span className="text-zinc-500">Database Table:</span>
+              <span className="text-zinc-300">{bootstrapFailure.databaseTable}</span>
+            </div>
+          )}
+
+          {bootstrapFailure?.databaseColumn && (
+            <div className="flex justify-between font-mono">
+              <span className="text-zinc-500">Database Column:</span>
+              <span className="text-zinc-300">{bootstrapFailure.databaseColumn}</span>
+            </div>
+          )}
+
+          {bootstrapFailure?.databaseConstraint && (
+            <div className="flex justify-between font-mono">
+              <span className="text-zinc-500">Database Constraint:</span>
+              <span className="text-zinc-300">{bootstrapFailure.databaseConstraint}</span>
+            </div>
+          )}
         </div>
 
         {interpretation && (
@@ -1566,7 +1739,7 @@ export default function App() {
           </div>
         )}
 
-        <div className="flex flex-wrap gap-4 justify-center mb-6 max-w-2xl">
+        <div className="flex flex-wrap gap-3 justify-center mb-6 max-w-2xl">
           <button
             onClick={() => {
               setInterpretation('');
@@ -1574,28 +1747,44 @@ export default function App() {
               setDiagnosticOpen(false);
               loadData();
             }}
-            className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-all"
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-all"
           >
             Retry Load
           </button>
           
           <button
-            onClick={handleCheckEnv}
-            className="px-5 py-2 bg-zinc-800 text-zinc-200 hover:text-white hover:bg-zinc-700 rounded-lg text-sm font-medium transition-all"
+            onClick={handleCopyDiagnostics}
+            className="px-4 py-2 bg-zinc-800 text-zinc-200 hover:text-white hover:bg-zinc-700 rounded-lg text-sm font-medium transition-all flex items-center gap-1.5"
           >
-            Check Environment
+            <Icons.Copy size={14} />
+            {copiedDiagnostics ? 'Copied!' : 'Copy Bootstrap Diagnostics'}
+          </button>
+
+          <button
+            onClick={testBootstrapApi}
+            disabled={testingBootstrap}
+            className="px-4 py-2 bg-zinc-800 text-zinc-200 hover:text-white hover:bg-zinc-700 rounded-lg text-sm font-medium transition-all disabled:opacity-50"
+          >
+            {testingBootstrap ? 'Testing...' : 'Test Bootstrap API'}
+          </button>
+
+          <button
+            onClick={handleCheckEnv}
+            className="px-4 py-2 bg-zinc-800 text-zinc-200 hover:text-white hover:bg-zinc-700 rounded-lg text-sm font-medium transition-all"
+          >
+            Check Health
           </button>
 
           <button
             onClick={handleCheckHealth}
-            className="px-5 py-2 bg-zinc-800 text-zinc-200 hover:text-white hover:bg-zinc-700 rounded-lg text-sm font-medium transition-all"
+            className="px-4 py-2 bg-zinc-800 text-zinc-200 hover:text-white hover:bg-zinc-700 rounded-lg text-sm font-medium transition-all"
           >
             Test Database Health
           </button>
 
           <button
             onClick={handleGetDiagnostics}
-            className="px-5 py-2 bg-zinc-800 text-zinc-200 hover:text-white hover:bg-zinc-700 rounded-lg text-sm font-medium transition-all"
+            className="px-4 py-2 bg-zinc-800 text-zinc-200 hover:text-white hover:bg-zinc-700 rounded-lg text-sm font-medium transition-all"
           >
             Open Diagnostics
           </button>

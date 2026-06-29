@@ -88,7 +88,7 @@ export function mapSetSongPlacement(row: any) {
     songId: row.song_id,
     setId: row.set_id || null,
     position: Number(row.position),
-    notes: row.notes || null,
+    notes: row.placement_notes ?? null,
 
     title: row.title,
     artist: row.artist || 'Unknown Artist',
@@ -104,7 +104,7 @@ export function mapSetSongPlacement(row: any) {
     guitarLessonUrl: row.guitar_url || null,
     bassLessonUrl: row.bass_url || null,
     lyricsUrl: row.lyrics_url || null,
-    generalNotes: row.song_notes || null,
+    generalNotes: row.song_notes ?? null,
     practiceStatus: displayStatus,
   };
 }

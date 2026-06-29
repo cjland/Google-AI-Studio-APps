@@ -1,5 +1,34 @@
 import { Song, SetList, GigDetails, BandSettings } from '@/types';
 
+export interface ApiErrorPayload {
+  ok?: boolean;
+  error?: string;
+  requestId?: string | null;
+  stage?: string | null;
+  code?: string | null;
+  message?: string | null;
+  detail?: string | null;
+  databaseTable?: string | null;
+  databaseColumn?: string | null;
+  databaseConstraint?: string | null;
+}
+
+export class ApiRequestError extends Error {
+  status: number;
+  payload: ApiErrorPayload | null;
+
+  constructor(
+    message: string,
+    status: number,
+    payload: ApiErrorPayload | null
+  ) {
+    super(message);
+    this.name = 'ApiRequestError';
+    this.status = status;
+    this.payload = payload;
+  }
+}
+
 // Shared safe response parser
 async function handleResponse(response: Response) {
   let json: any = null;
@@ -14,12 +43,19 @@ async function handleResponse(response: Response) {
   }
 
   if (!response.ok) {
-    // Return a human-readable, user-friendly message
-    const errorMsg = json?.detail || json?.error || `Request failed with status ${response.status}`;
-    const error = new Error(errorMsg) as any;
-    error.status = response.status;
-    error.data = json;
-    throw error;
+    const payload = json as ApiErrorPayload | null;
+
+    const message =
+      payload?.message ||
+      payload?.detail ||
+      payload?.error ||
+      `Request failed with status ${response.status}`;
+
+    throw new ApiRequestError(
+      message,
+      response.status,
+      payload
+    );
   }
 
   return json;
@@ -85,7 +121,12 @@ export async function getDiagnostics() {
 
 export async function loadBootstrap(gigId?: string) {
   const url = gigId ? `/api/bootstrap?gigId=${encodeURIComponent(gigId)}` : '/api/bootstrap';
-  const res = await fetch(url);
+  const res = await fetch(url, {
+    cache: 'no-store',
+    headers: {
+      Accept: 'application/json'
+    }
+  });
   return handleResponse(res);
 }
 

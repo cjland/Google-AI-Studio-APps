@@ -8,6 +8,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const requestId = randomUUID();
   let stage = 'start';
 
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
+
   if (req.method !== 'GET') {
     res.setHeader('Allow', ['GET']);
     return res.status(405).json({
@@ -40,28 +42,75 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     stage = 'load-songs';
     const songRows = await sql`
-      SELECT *
+      SELECT
+        id,
+        band_id,
+        external_id,
+        title,
+        artist,
+        duration_seconds,
+        rating,
+        status,
+        video_url,
+        guitar_url,
+        bass_url,
+        lyrics_url,
+        notes,
+        tags,
+        google_sheet_row,
+        source_updated_at,
+        created_at,
+        updated_at
       FROM songs
       WHERE band_id = ${band.id}
-        AND status <> 'Archived'
-      ORDER BY LOWER(title), LOWER(artist)
+        AND LOWER(status) <> 'archived'
+      ORDER BY
+        LOWER(title),
+        LOWER(COALESCE(artist, ''));
     `;
     const songs = songRows.map(mapSong);
 
     stage = 'load-gigs';
     const gigRows = await sql`
-      SELECT g.*,
-        (SELECT COUNT(*)::int FROM gig_sets s WHERE s.gig_id = g.id) AS set_count,
-        (SELECT COUNT(*)::int FROM set_songs ss WHERE ss.set_id IN (SELECT id FROM gig_sets s WHERE s.gig_id = g.id)) AS song_count,
+      SELECT
+        g.id,
+        g.band_id,
+        g.name,
+        g.venue,
+        g.location,
+        g.gig_date,
+        g.arrival_time,
+        g.start_time,
+        g.notes,
+        g.status,
+        g.created_at,
+        g.updated_at,
+        (
+          SELECT COUNT(*)::INTEGER
+          FROM gig_sets gs
+          WHERE gs.gig_id = g.id
+        ) AS set_count,
+        (
+          SELECT COUNT(*)::INTEGER
+          FROM set_songs ss
+          JOIN gig_sets gs
+            ON gs.id = ss.set_id
+          WHERE gs.gig_id = g.id
+        ) AS song_count,
         COALESCE(
-          (SELECT SUM(so.duration_seconds)::int 
-           FROM set_songs ss 
-           JOIN songs so ON ss.song_id = so.id 
-           WHERE ss.set_id IN (SELECT id FROM gig_sets s WHERE s.gig_id = g.id)), 
+          (
+            SELECT SUM(COALESCE(s.duration_seconds, 0))::INTEGER
+            FROM set_songs ss
+            JOIN gig_sets gs
+              ON gs.id = ss.set_id
+            JOIN songs s
+              ON s.id = ss.song_id
+            WHERE gs.gig_id = g.id
+          ),
           0
         ) AS total_duration_seconds
       FROM gigs g
-      WHERE g.band_id = ${band.id}
+      WHERE g.band_id = ${band.id};
     `;
     const gigs = gigRows.map(mapGig);
 
@@ -123,10 +172,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     stage = 'load-sets';
     const setRows = await sql`
-      SELECT *
+      SELECT
+        id,
+        gig_id,
+        name,
+        set_number,
+        status,
+        target_duration_seconds,
+        sort_order,
+        created_at,
+        updated_at
       FROM gig_sets
       WHERE gig_id = ${activeGig.id}
-      ORDER BY sort_order ASC, set_number ASC
+      ORDER BY sort_order, set_number;
     `;
     const sets = setRows.map(mapGigSet);
 
@@ -210,7 +268,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
   } catch (error: any) {
-    console.error('Bootstrap failed:', error);
+    console.error('Bootstrap failed', {
+      requestId,
+      stage,
+      code: error?.code ?? null,
+      message: error?.message ?? null,
+      detail: error?.detail ?? null,
+      table: error?.table ?? null,
+      column: error?.column ?? null,
+      constraint: error?.constraint ?? null
+    });
     return res.status(500).json({
       ok: false,
       error: 'Unable to load setlist data.',
@@ -218,7 +285,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       stage,
       code: error?.code ?? null,
       message: error?.message ?? null,
-      detail: error?.detail ?? null
+      detail: error?.detail ?? null,
+      databaseTable: error?.table ?? null,
+      databaseColumn: error?.column ?? null,
+      databaseConstraint: error?.constraint ?? null
     });
   }
 }
