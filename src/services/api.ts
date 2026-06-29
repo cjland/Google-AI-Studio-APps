@@ -1,0 +1,96 @@
+import { Song, SetList, GigDetails, BandSettings } from '@/types';
+
+// Shared safe response parser
+async function handleResponse(response: Response) {
+  let json: any = null;
+  const contentType = response.headers.get('content-type');
+
+  try {
+    if (contentType && contentType.includes('application/json')) {
+      json = await response.json();
+    }
+  } catch (err) {
+    console.error('Failed to parse response JSON:', err);
+  }
+
+  if (!response.ok) {
+    // Return a human-readable, user-friendly message
+    const errorMsg = json?.detail || json?.error || `Request failed with status ${response.status}`;
+    throw new Error(errorMsg);
+  }
+
+  return json;
+}
+
+export async function checkHealth() {
+  const res = await fetch('/api/health');
+  return handleResponse(res);
+}
+
+export async function loadBootstrap(gigId?: string) {
+  const url = gigId ? `/api/bootstrap?gigId=${encodeURIComponent(gigId)}` : '/api/bootstrap';
+  const res = await fetch(url);
+  return handleResponse(res);
+}
+
+export interface SaveStatePayload {
+  bandSettings: BandSettings;
+  songs: Song[];
+  gig: GigDetails & { id: string; status?: string };
+  sets: SetList[];
+}
+
+export async function saveState(payload: SaveStatePayload) {
+  const res = await fetch('/api/save-state', {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse(res);
+}
+
+export async function getGigs() {
+  const res = await fetch('/api/gigs');
+  return handleResponse(res);
+}
+
+export interface CreateGigPayload {
+  name: string;
+  location?: string;
+  gigDate?: string;
+  startTime?: string;
+  arriveTime?: string;
+  notes?: string;
+  status?: string;
+}
+
+export async function createGig(payload: CreateGigPayload) {
+  const res = await fetch('/api/gigs', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse(res);
+}
+
+export async function updateGig(id: string, payload: Partial<CreateGigPayload>) {
+  const res = await fetch('/api/gigs', {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ id, ...payload }),
+  });
+  return handleResponse(res);
+}
+
+export async function deleteGig(id: string) {
+  const res = await fetch(`/api/gigs?id=${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+  return handleResponse(res);
+}
