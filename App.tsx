@@ -1483,6 +1483,16 @@ export default function App() {
 
   // Render Bootstrap Failure Error Panel
   if (errorState) {
+    const safeStringify = (val: any): string => {
+      if (val === null || val === undefined) return '';
+      if (typeof val === 'string') return val;
+      try {
+        return typeof val === 'object' ? JSON.stringify(val, null, 2) : String(val);
+      } catch {
+        return String(val);
+      }
+    };
+
     const handleCheckEnv = async () => {
       setDiagnosticTitle('Environment & Health Check');
       setDiagnosticOpen(true);
@@ -1550,8 +1560,8 @@ export default function App() {
       const requestId = bootstrapFailure?.requestId || errorState?.requestId || 'N/A';
       const stage = bootstrapFailure?.stage || errorState?.stage || 'Unknown';
       const code = bootstrapFailure?.code || errorState?.code || 'Unknown';
-      const message = bootstrapFailure?.message || errorState?.message || 'None';
-      const detail = bootstrapFailure?.detail || errorState?.detail || 'None';
+      const message = safeStringify(bootstrapFailure?.message || errorState?.message || 'None');
+      const detail = safeStringify(bootstrapFailure?.detail || errorState?.detail || 'None');
       const deploymentId = databaseHealth.health?.deploymentId || 'Unknown';
 
       const text = `SetList Bootstrap Failure
@@ -1692,7 +1702,7 @@ Deployment ID: ${deploymentId}`;
           <div className="flex flex-col gap-1 border-t border-zinc-900 pt-2 mt-2 font-mono">
             <span className="text-zinc-500">Database Message:</span>
             <span className="text-zinc-200 bg-black/40 p-2 rounded border border-zinc-900 whitespace-pre-wrap break-all select-all font-sans text-xs">
-              {bootstrapFailure?.message || errorState?.message || 'None'}
+              {safeStringify(bootstrapFailure?.message || errorState?.message || 'None')}
             </span>
           </div>
 
@@ -1700,7 +1710,7 @@ Deployment ID: ${deploymentId}`;
             <div className="flex flex-col gap-1 font-mono">
               <span className="text-zinc-500">Database Detail:</span>
               <span className="text-zinc-300 bg-black/40 p-2 rounded border border-zinc-900 whitespace-pre-wrap break-all select-all font-sans text-xs">
-                {bootstrapFailure?.detail || errorState?.detail}
+                {safeStringify(bootstrapFailure?.detail || errorState?.detail)}
               </span>
             </div>
           )}

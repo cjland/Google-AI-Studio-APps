@@ -76,7 +76,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         g.id,
         g.band_id,
         g.name,
-        g.venue,
         g.location,
         g.gig_date,
         g.arrival_time,
