@@ -684,6 +684,23 @@ export default function App() {
     databaseTable?: string | null;
     databaseColumn?: string | null;
     databaseConstraint?: string | null;
+    hint?: string | null;
+  }
+
+  function formatDiagnosticValue(value: unknown): string {
+    if (value === null || value === undefined || value === '') {
+      return 'N/A';
+    }
+
+    if (typeof value === 'string') {
+      return value;
+    }
+
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch {
+      return String(value);
+    }
   }
 
   const [bootstrapFailure, setBootstrapFailure] = useState<BootstrapFailure | null>(null);
@@ -789,30 +806,50 @@ export default function App() {
       setIsInitialized(true);
     } catch (err: any) {
       console.error('Failed to load setlist data:', err);
+      const databaseError = err.payload?.databaseError;
+
+      const formattedMsg = formatDiagnosticValue(
+        databaseError?.message ||
+        err.payload?.message ||
+        err.message
+      );
+
+      const formattedDetail = formatDiagnosticValue(
+        databaseError?.detail ||
+        err.payload?.detail ||
+        err.detail ||
+        'Database connection error'
+      );
+
       setErrorState({
-        message: 'Unable to load setlist data from Neon',
-        detail: err.message || 'Database connection error',
-        requestId: err.payload?.requestId || err.data?.requestId || err.requestId,
-        stage: err.payload?.stage || err.data?.stage || err.stage,
-        code: err.payload?.code || err.data?.code || err.code
+        message: formattedMsg,
+        detail: formattedDetail,
+        requestId: formatDiagnosticValue(databaseError?.requestId || err.payload?.requestId || err.data?.requestId || err.requestId),
+        stage: formatDiagnosticValue(databaseError?.stage || err.payload?.stage || err.data?.stage || err.stage),
+        code: formatDiagnosticValue(databaseError?.code || err.payload?.code || err.data?.code || err.code)
       });
 
       if (err instanceof ApiRequestError) {
         setBootstrapFailure({
           httpStatus: err.status,
-          requestId: err.payload?.requestId ?? null,
-          stage: err.payload?.stage ?? null,
-          code: err.payload?.code ?? null,
-          message: err.payload?.message ?? err.message,
-          detail: err.payload?.detail ?? null,
-          error: err.payload?.error ?? null,
-          databaseTable: err.payload?.databaseTable ?? null,
-          databaseColumn: err.payload?.databaseColumn ?? null,
-          databaseConstraint: err.payload?.databaseConstraint ?? null
+          requestId: formatDiagnosticValue(databaseError?.requestId || err.payload?.requestId),
+          stage: formatDiagnosticValue(databaseError?.stage || err.payload?.stage),
+          code: formatDiagnosticValue(databaseError?.code || err.payload?.code),
+          message: formattedMsg,
+          detail: formattedDetail,
+          error: formatDiagnosticValue(err.payload?.error),
+          databaseTable: formatDiagnosticValue(databaseError?.table || err.payload?.databaseTable),
+          databaseColumn: formatDiagnosticValue(databaseError?.column || err.payload?.databaseColumn),
+          databaseConstraint: formatDiagnosticValue(databaseError?.constraint || err.payload?.databaseConstraint),
+          hint: formatDiagnosticValue(databaseError?.hint || err.payload?.hint)
         });
       } else {
         setBootstrapFailure({
-          message: err instanceof Error ? err.message : 'Unknown bootstrap error'
+          message: formattedMsg,
+          detail: formattedDetail,
+          code: formatDiagnosticValue(err?.code),
+          requestId: formatDiagnosticValue(err?.requestId),
+          stage: formatDiagnosticValue(err?.stage)
         });
       }
     } finally {
@@ -1733,6 +1770,15 @@ Deployment ID: ${deploymentId}`;
             <div className="flex justify-between font-mono">
               <span className="text-zinc-500">Database Constraint:</span>
               <span className="text-zinc-300">{bootstrapFailure.databaseConstraint}</span>
+            </div>
+          )}
+
+          {bootstrapFailure?.hint && (
+            <div className="flex flex-col gap-1 font-mono">
+              <span className="text-zinc-500">Database Hint:</span>
+              <span className="text-amber-300 bg-black/40 p-2 rounded border border-zinc-900 whitespace-pre-wrap break-all select-all font-sans text-xs">
+                {safeStringify(bootstrapFailure.hint)}
+              </span>
             </div>
           )}
         </div>

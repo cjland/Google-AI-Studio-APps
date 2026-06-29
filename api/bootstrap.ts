@@ -4,6 +4,26 @@ import { getSql } from './_lib/db';
 import { getCurrentBand } from './_lib/currentBand';
 import { mapSong, mapGig, mapGigSet, mapSetSongPlacement } from './_lib/mappers';
 
+function serializeError(error: unknown) {
+  const err = error as any;
+
+  return {
+    name: typeof err?.name === 'string' ? err.name : null,
+    message:
+      typeof err?.message === 'string'
+        ? err.message
+        : String(error ?? 'Unknown database error'),
+    code: typeof err?.code === 'string' ? err.code : null,
+    detail: typeof err?.detail === 'string' ? err.detail : null,
+    hint: typeof err?.hint === 'string' ? err.hint : null,
+    table: typeof err?.table === 'string' ? err.table : null,
+    column: typeof err?.column === 'string' ? err.column : null,
+    constraint:
+      typeof err?.constraint === 'string' ? err.constraint : null,
+    schema: typeof err?.schema === 'string' ? err.schema : null
+  };
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const requestId = randomUUID();
   let stage = 'start';
@@ -277,17 +297,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       column: error?.column ?? null,
       constraint: error?.constraint ?? null
     });
+
+    const databaseError = serializeError(error);
+
     return res.status(500).json({
       ok: false,
       error: 'Unable to load setlist data.',
       requestId,
       stage,
-      code: error?.code ?? null,
-      message: error?.message ?? null,
-      detail: error?.detail ?? null,
-      databaseTable: error?.table ?? null,
-      databaseColumn: error?.column ?? null,
-      databaseConstraint: error?.constraint ?? null
+      databaseError,
+      message: databaseError.message,
+      code: databaseError.code,
+      detail: databaseError.detail,
+      hint: databaseError.hint,
+      databaseTable: databaseError.table,
+      databaseColumn: databaseError.column,
+      databaseConstraint: databaseError.constraint
     });
   }
 }

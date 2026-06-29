@@ -11,6 +11,18 @@ export interface ApiErrorPayload {
   databaseTable?: string | null;
   databaseColumn?: string | null;
   databaseConstraint?: string | null;
+  hint?: string | null;
+  databaseError?: {
+    name?: string | null;
+    message?: string | null;
+    code?: string | null;
+    detail?: string | null;
+    hint?: string | null;
+    table?: string | null;
+    column?: string | null;
+    constraint?: string | null;
+    schema?: string | null;
+  };
 }
 
 export class ApiRequestError extends Error {
@@ -31,34 +43,33 @@ export class ApiRequestError extends Error {
 
 // Shared safe response parser
 async function handleResponse(response: Response) {
-  let json: any = null;
-  const contentType = response.headers.get('content-type');
+  const rawBody = await response.text();
+  let payload: any = null;
 
-  try {
-    if (contentType && contentType.includes('application/json')) {
-      json = await response.json();
+  if (rawBody) {
+    try {
+      payload = JSON.parse(rawBody);
+    } catch {
+      payload = {
+        message: rawBody
+      };
     }
-  } catch (err) {
-    console.error('Failed to parse response JSON:', err);
   }
 
   if (!response.ok) {
-    const payload = json as ApiErrorPayload | null;
+    const databaseError = payload?.databaseError;
 
     const message =
+      databaseError?.message ||
       payload?.message ||
       payload?.detail ||
       payload?.error ||
       `Request failed with status ${response.status}`;
 
-    throw new ApiRequestError(
-      message,
-      response.status,
-      payload
-    );
+    throw new ApiRequestError(message, response.status, payload);
   }
 
-  return json;
+  return payload;
 }
 
 export type DatabaseHealthStatus =
