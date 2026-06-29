@@ -99,11 +99,11 @@ const EditSongModal = ({ song, isOpen, onClose, onSave }: { song: Song | null, i
                         <h4 className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Basic Info</h4>
                         <div>
                             <label className="text-xs text-zinc-400 block mb-1">Song Title</label>
-                            <input type="text" value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} className="w-full bg-black/30 border border-zinc-700 rounded p-2 text-sm text-white focus:border-primary outline-none" />
+                            <input type="text" value={formData.title || ''} onChange={e => setFormData({...formData, title: e.target.value})} className="w-full bg-black/30 border border-zinc-700 rounded p-2 text-sm text-white focus:border-primary outline-none" />
                         </div>
                         <div>
                             <label className="text-xs text-zinc-400 block mb-1">Artist</label>
-                            <input type="text" value={formData.artist} onChange={e => setFormData({...formData, artist: e.target.value})} className="w-full bg-black/30 border border-zinc-700 rounded p-2 text-sm text-white focus:border-primary outline-none" />
+                            <input type="text" value={formData.artist || ''} onChange={e => setFormData({...formData, artist: e.target.value})} className="w-full bg-black/30 border border-zinc-700 rounded p-2 text-sm text-white focus:border-primary outline-none" />
                         </div>
                         <div className="flex gap-4">
                             <div className="flex-1">
@@ -416,7 +416,7 @@ const BandSettingsModal = ({
                             <input 
                                 type="text" 
                                 className="w-full bg-background border border-zinc-700 rounded p-2 text-sm text-white focus:border-primary outline-none"
-                                value={data.name}
+                                value={data.name || ''}
                                 onChange={e => setData({...data, name: e.target.value})}
                             />
                         </div>
@@ -426,7 +426,7 @@ const BandSettingsModal = ({
                                  <input 
                                     type="text" 
                                     className="flex-1 bg-background border border-zinc-700 rounded p-2 text-sm text-white focus:border-primary outline-none"
-                                    value={data.logoUrl}
+                                    value={data.logoUrl || ''}
                                     onChange={e => setData({...data, logoUrl: e.target.value})}
                                     placeholder="https://..."
                                 />
@@ -445,7 +445,7 @@ const BandSettingsModal = ({
                                         <input 
                                             type="text"
                                             className="w-full bg-background border border-zinc-700 rounded p-2 text-sm text-white focus:border-primary outline-none"
-                                            value={member}
+                                            value={member || ''}
                                             onChange={(e) => handleUpdateMemberSlot(idx, e.target.value)}
                                             placeholder={`Member {idx + 1}`}
                                         />
@@ -1684,7 +1684,7 @@ export default function App() {
                               <input 
                                  type="text"
                                  className="w-full bg-background border border-zinc-700 rounded p-2 text-sm text-white focus:border-primary outline-none"
-                                 value={gigDetails.name}
+                                 value={gigDetails.name || ''}
                                  onChange={e => {
                                      setGigDetails({...gigDetails, name: e.target.value});
                                      markDirty();
@@ -1741,7 +1741,7 @@ export default function App() {
                                    <label className="block text-xs text-zinc-500 mb-1 flex items-center gap-1"><Icons.Clock size={10}/> Arrival Time</label>
                                    <select
                                       className="w-full bg-background border border-zinc-700 rounded p-2 text-xs text-white focus:border-primary outline-none"
-                                      value={gigDetails.arriveTime}
+                                      value={gigDetails.arriveTime || ''}
                                       onChange={e => {
                                           setGigDetails({...gigDetails, arriveTime: e.target.value});
                                           markDirty();
@@ -1754,7 +1754,7 @@ export default function App() {
                                    <label className="block text-xs text-zinc-500 mb-1 flex items-center gap-1"><Icons.Clock size={10}/> Start Time</label>
                                    <select
                                       className="w-full bg-background border border-zinc-700 rounded p-2 text-xs text-white focus:border-primary outline-none"
-                                      value={gigDetails.startTime}
+                                      value={gigDetails.startTime || ''}
                                       onChange={e => {
                                           setGigDetails({...gigDetails, startTime: e.target.value});
                                           markDirty();
