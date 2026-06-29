@@ -2,23 +2,79 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { randomUUID } from 'node:crypto';
 import { getSql, hasDatabaseUrl } from './_lib/db';
 
+function valueAsText(value: unknown): string | null {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (
+    typeof value === 'number' ||
+    typeof value === 'boolean' ||
+    typeof value === 'bigint'
+  ) {
+    return String(value);
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function findNestedValue(error: any, key: string): unknown {
+  const possibleSources = [
+    error,
+    error?.cause,
+    error?.sourceError,
+    error?.originalError,
+    error?.error,
+    error?.response,
+    error?.response?.data,
+    error?.data
+  ];
+
+  for (const source of possibleSources) {
+    if (
+      source &&
+      typeof source === 'object' &&
+      source[key] !== undefined &&
+      source[key] !== null
+    ) {
+      return source[key];
+    }
+  }
+
+  return null;
+}
+
 function serializeError(error: unknown) {
   const err = error as any;
 
+  const messageValue =
+    findNestedValue(err, 'message') ??
+    findNestedValue(err, 'error') ??
+    findNestedValue(err, 'detail') ??
+    error;
+
   return {
-    name: typeof err?.name === 'string' ? err.name : null,
+    name: valueAsText(findNestedValue(err, 'name')),
     message:
-      typeof err?.message === 'string'
-        ? err.message
-        : String(error ?? 'Unknown error'),
-    code: typeof err?.code === 'string' ? err.code : null,
-    detail: typeof err?.detail === 'string' ? err.detail : null,
-    hint: typeof err?.hint === 'string' ? err.hint : null,
-    table: typeof err?.table === 'string' ? err.table : null,
-    column: typeof err?.column === 'string' ? err.column : null,
-    constraint:
-      typeof err?.constraint === 'string' ? err.constraint : null,
-    schema: typeof err?.schema === 'string' ? err.schema : null
+      valueAsText(messageValue) ||
+      'Unknown database error',
+    code: valueAsText(findNestedValue(err, 'code')),
+    detail: valueAsText(findNestedValue(err, 'detail')),
+    hint: valueAsText(findNestedValue(err, 'hint')),
+    table: valueAsText(findNestedValue(err, 'table')),
+    column: valueAsText(findNestedValue(err, 'column')),
+    constraint: valueAsText(findNestedValue(err, 'constraint')),
+    schema: valueAsText(findNestedValue(err, 'schema')),
+    cause: valueAsText(err?.cause),
+    raw: valueAsText(error)
   };
 }
 
