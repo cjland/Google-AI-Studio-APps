@@ -2,26 +2,32 @@ import { Song, SetList, GigDetails, BandSettings } from '@/types';
 
 export interface ApiErrorPayload {
   ok?: boolean;
-  error?: string;
+  error?: unknown;
   requestId?: string | null;
   stage?: string | null;
   code?: string | null;
-  message?: string | null;
-  detail?: string | null;
+  message?: unknown;
+  detail?: unknown;
+  hint?: unknown;
   databaseTable?: string | null;
   databaseColumn?: string | null;
   databaseConstraint?: string | null;
-  hint?: string | null;
+  httpStatus?: number;
+  statusText?: string;
+  contentType?: string | null;
+  rawResponse?: string;
+  normalizedMessage?: string;
+
   databaseError?: {
-    name?: string | null;
-    message?: string | null;
-    code?: string | null;
-    detail?: string | null;
-    hint?: string | null;
-    table?: string | null;
-    column?: string | null;
-    constraint?: string | null;
-    schema?: string | null;
+    name?: unknown;
+    message?: unknown;
+    code?: unknown;
+    detail?: unknown;
+    hint?: unknown;
+    table?: unknown;
+    column?: unknown;
+    constraint?: unknown;
+    schema?: unknown;
   };
 }
 
@@ -41,9 +47,52 @@ export class ApiRequestError extends Error {
   }
 }
 
+function stringifyUnknown(value: unknown): string {
+  if (value === null || value === undefined) {
+    return '';
+  }
+
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (value instanceof Error) {
+    return value.message;
+  }
+
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function findErrorMessage(payload: any): string {
+  const candidates = [
+    payload?.databaseError?.message,
+    payload?.message?.message,
+    payload?.message,
+    payload?.error?.message,
+    payload?.error,
+    payload?.detail?.message,
+    payload?.detail
+  ];
+
+  for (const candidate of candidates) {
+    const text = stringifyUnknown(candidate);
+
+    if (text && text !== '{}' && text !== '[object Object]') {
+      return text;
+    }
+  }
+
+  return 'Unknown API error';
+}
+
 // Shared safe response parser
 async function handleResponse(response: Response) {
   const rawBody = await response.text();
+
   let payload: any = null;
 
   if (rawBody) {
@@ -51,22 +100,28 @@ async function handleResponse(response: Response) {
       payload = JSON.parse(rawBody);
     } catch {
       payload = {
-        message: rawBody
+        rawResponse: rawBody
       };
     }
   }
 
   if (!response.ok) {
-    const databaseError = payload?.databaseError;
+    const message = findErrorMessage(payload);
 
-    const message =
-      databaseError?.message ||
-      payload?.message ||
-      payload?.detail ||
-      payload?.error ||
-      `Request failed with status ${response.status}`;
+    const normalizedPayload = {
+      ...(payload && typeof payload === 'object' ? payload : {}),
+      httpStatus: response.status,
+      statusText: response.statusText,
+      contentType: response.headers.get('content-type'),
+      rawResponse: rawBody,
+      normalizedMessage: message
+    };
 
-    throw new ApiRequestError(message, response.status, payload);
+    throw new ApiRequestError(
+      message || `Request failed with status ${response.status}`,
+      response.status,
+      normalizedPayload
+    );
   }
 
   return payload;

@@ -26,9 +26,11 @@ function serializeError(error: unknown) {
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const requestId = randomUUID();
-  let stage = 'start';
+  let stage = 'handler-start';
 
   res.setHeader('Cache-Control', 'no-store, max-age=0');
+  res.setHeader('X-Setlist-API-Version', 'bootstrap-debug-v7');
+  res.setHeader('X-Setlist-Request-ID', requestId);
 
   if (req.method !== 'GET') {
     res.setHeader('Allow', ['GET']);
@@ -40,7 +42,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   }
 
+  if (req.query.debug === 'ping') {
+    return res.status(200).json({
+      ok: true,
+      apiVersion: 'bootstrap-debug-v7',
+      requestId,
+      stage,
+      databaseUrlPresent: Boolean(process.env.DATABASE_URL),
+      deploymentId:
+        process.env.VERCEL_DEPLOYMENT_ID ||
+        process.env.VERCEL_GIT_COMMIT_SHA ||
+        null
+    });
+  }
+
   try {
+    stage = 'create-neon-client';
     const sql = getSql();
 
     stage = 'resolve-band';
@@ -298,21 +315,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       constraint: error?.constraint ?? null
     });
 
-    const databaseError = serializeError(error);
+    const dbError = serializeError(error);
 
     return res.status(500).json({
       ok: false,
+      apiVersion: 'bootstrap-debug-v7',
       error: 'Unable to load setlist data.',
       requestId,
       stage,
-      databaseError,
-      message: databaseError.message,
-      code: databaseError.code,
-      detail: databaseError.detail,
-      hint: databaseError.hint,
-      databaseTable: databaseError.table,
-      databaseColumn: databaseError.column,
-      databaseConstraint: databaseError.constraint
+      code: dbError.code,
+      message: dbError.message,
+      detail: dbError.detail,
+      hint: dbError.hint,
+      severity: error?.severity ?? null,
+      databaseTable: dbError.table,
+      databaseColumn: dbError.column,
+      databaseConstraint: dbError.constraint
     });
   }
 }

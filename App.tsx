@@ -24,6 +24,26 @@ import { loadBootstrap, saveState, getGigs, createGig, updateGig, deleteGig, che
 import { useDatabaseHealth } from './src/hooks/useDatabaseHealth';
 import { DatabaseHealthBadge } from './src/components/DatabaseHealthBadge';
 
+function diagnosticText(value: unknown, fallback = 'N/A'): string {
+  if (value === null || value === undefined || value === '') {
+    return fallback;
+  }
+
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (value instanceof Error) {
+    return value.message;
+  }
+
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
 const dropAnimation: DropAnimation = {
   sideEffects: defaultDropAnimationSideEffects({
     styles: {
@@ -685,6 +705,7 @@ export default function App() {
     databaseColumn?: string | null;
     databaseConstraint?: string | null;
     hint?: string | null;
+    rawResponse?: string | null;
   }
 
   function formatDiagnosticValue(value: unknown): string {
@@ -806,52 +827,82 @@ export default function App() {
       setIsInitialized(true);
     } catch (err: any) {
       console.error('Failed to load setlist data:', err);
-      const databaseError = err.payload?.databaseError;
 
-      const formattedMsg = formatDiagnosticValue(
-        databaseError?.message ||
-        err.payload?.message ||
-        err.message
+      const payload =
+        err instanceof ApiRequestError
+          ? err.payload
+          : err?.payload || err?.data || null;
+
+      const databaseError = payload?.databaseError;
+
+      const message = diagnosticText(
+        databaseError?.message ??
+        payload?.normalizedMessage ??
+        payload?.message ??
+        payload?.error ??
+        err?.message,
+        'Unable to load setlist data from Neon'
       );
 
-      const formattedDetail = formatDiagnosticValue(
-        databaseError?.detail ||
-        err.payload?.detail ||
-        err.detail ||
-        'Database connection error'
+      const detail = diagnosticText(
+        databaseError?.detail ??
+        payload?.detail ??
+        payload?.rawResponse,
+        'No additional database detail returned'
       );
 
       setErrorState({
-        message: formattedMsg,
-        detail: formattedDetail,
-        requestId: formatDiagnosticValue(databaseError?.requestId || err.payload?.requestId || err.data?.requestId || err.requestId),
-        stage: formatDiagnosticValue(databaseError?.stage || err.payload?.stage || err.data?.stage || err.stage),
-        code: formatDiagnosticValue(databaseError?.code || err.payload?.code || err.data?.code || err.code)
+        message,
+        detail,
+        requestId: diagnosticText(payload?.requestId, 'N/A'),
+        stage: diagnosticText(payload?.stage, 'N/A'),
+        code: diagnosticText(
+          databaseError?.code ?? payload?.code,
+          'N/A'
+        )
       });
 
-      if (err instanceof ApiRequestError) {
-        setBootstrapFailure({
-          httpStatus: err.status,
-          requestId: formatDiagnosticValue(databaseError?.requestId || err.payload?.requestId),
-          stage: formatDiagnosticValue(databaseError?.stage || err.payload?.stage),
-          code: formatDiagnosticValue(databaseError?.code || err.payload?.code),
-          message: formattedMsg,
-          detail: formattedDetail,
-          error: formatDiagnosticValue(err.payload?.error),
-          databaseTable: formatDiagnosticValue(databaseError?.table || err.payload?.databaseTable),
-          databaseColumn: formatDiagnosticValue(databaseError?.column || err.payload?.databaseColumn),
-          databaseConstraint: formatDiagnosticValue(databaseError?.constraint || err.payload?.databaseConstraint),
-          hint: formatDiagnosticValue(databaseError?.hint || err.payload?.hint)
-        });
-      } else {
-        setBootstrapFailure({
-          message: formattedMsg,
-          detail: formattedDetail,
-          code: formatDiagnosticValue(err?.code),
-          requestId: formatDiagnosticValue(err?.requestId),
-          stage: formatDiagnosticValue(err?.stage)
-        });
-      }
+      setBootstrapFailure({
+        httpStatus:
+          err instanceof ApiRequestError
+            ? err.status
+            : payload?.httpStatus || 500,
+
+        requestId: diagnosticText(payload?.requestId, 'N/A'),
+        stage: diagnosticText(payload?.stage, 'N/A'),
+
+        code: diagnosticText(
+          databaseError?.code ?? payload?.code,
+          'N/A'
+        ),
+
+        message,
+
+        detail,
+
+        error: diagnosticText(payload?.error, 'N/A'),
+
+        databaseTable: diagnosticText(
+          databaseError?.table ?? payload?.databaseTable,
+          'N/A'
+        ),
+
+        databaseColumn: diagnosticText(
+          databaseError?.column ?? payload?.databaseColumn,
+          'N/A'
+        ),
+
+        databaseConstraint: diagnosticText(
+          databaseError?.constraint ??
+          payload?.databaseConstraint,
+          'N/A'
+        ),
+
+        rawResponse: diagnosticText(
+          payload?.rawResponse,
+          'No raw response captured'
+        )
+      });
     } finally {
       setLoading(false);
     }
@@ -1751,6 +1802,17 @@ Deployment ID: ${deploymentId}`;
               </span>
             </div>
           )}
+
+          <div className="flex flex-col gap-1 font-mono">
+            <span className="text-zinc-500">Raw Bootstrap Response:</span>
+
+            <pre className="text-zinc-300 bg-black/40 p-2 rounded border border-zinc-900 whitespace-pre-wrap break-all select-all font-mono text-xs max-h-64 overflow-auto">
+              {diagnosticText(
+                bootstrapFailure?.rawResponse,
+                'No raw response captured'
+              )}
+            </pre>
+          </div>
 
           {bootstrapFailure?.databaseTable && (
             <div className="flex justify-between font-mono">
