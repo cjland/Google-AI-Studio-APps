@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { randomUUID } from 'node:crypto';
-import { getSql, hasDatabaseUrl } from './_lib/db';
+import { getSql, hasDatabaseUrl, ensureSchema } from './_lib/db';
 
 interface DiagnosticCheck {
   ok: boolean;
@@ -67,8 +67,9 @@ export default async function handler(
   let sql;
   try {
     sql = getSql();
+    await ensureSchema();
   } catch (err: any) {
-    const msg = err?.message ?? 'Failed to initialize database client';
+    const msg = err?.message ?? 'Failed to initialize database client or create schema';
     checks.connection = { ok: false, code: err?.code ?? 'INIT_FAILED', message: msg };
     return res.status(200).json({
       ok: false,
