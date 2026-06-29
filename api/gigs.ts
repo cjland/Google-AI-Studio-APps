@@ -76,7 +76,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const newGigId = uuidv4();
       const gigRes = await client.query(
         `INSERT INTO gigs (
-          id, band_id, name, location, gig_date, start_time, arrive_time, notes, status, updated_at
+          id, band_id, name, location, gig_date, start_time, arrival_time, notes, status, updated_at
         ) VALUES (
           $1, $2, $3, $4, $5, $6, $7, $8, $9, NOW()
         ) RETURNING *`,
@@ -97,9 +97,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const newSetId = uuidv4();
       const setRes = await client.query(
         `INSERT INTO gig_sets (
-          id, gig_id, name, set_number, sort_order, color, status, target_duration_seconds, updated_at
+          id, gig_id, name, set_number, sort_order, status, target_duration_seconds, updated_at
         ) VALUES (
-          $1, $2, $3, 1, 1, '', 'Draft', NULL, NOW()
+          $1, $2, $3, 1, 1, 'Draft', NULL, NOW()
         ) RETURNING *`,
         [newSetId, newGigId, 'Set 1']
       );
@@ -135,7 +135,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
              location = COALESCE($2, location),
              gig_date = COALESCE($3, gig_date),
              start_time = COALESCE($4, start_time),
-             arrive_time = COALESCE($5, arrive_time),
+             arrival_time = COALESCE($5, arrival_time),
              notes = COALESCE($6, notes),
              status = COALESCE($7, status),
              updated_at = NOW()

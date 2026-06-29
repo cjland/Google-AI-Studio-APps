@@ -139,7 +139,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const gRes = await client.query(
       `INSERT INTO gigs (
-        id, band_id, name, location, gig_date, start_time, arrive_time, notes, status, updated_at
+        id, band_id, name, location, gig_date, start_time, arrival_time, notes, status, updated_at
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, NOW()
       )
@@ -148,7 +148,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         location = EXCLUDED.location,
         gig_date = EXCLUDED.gig_date,
         start_time = EXCLUDED.start_time,
-        arrive_time = EXCLUDED.arrive_time,
+        arrival_time = EXCLUDED.arrival_time,
         notes = EXCLUDED.notes,
         status = EXCLUDED.status,
         updated_at = NOW()
