@@ -9,6 +9,8 @@ import gigsHandler from './api/gigs';
 import healthHandler from './api/health';
 import saveStateHandler from './api/save-state';
 import setupHandler from './api/setup';
+import envCheckHandler from './api/env-check';
+import diagnosticsHandler from './api/diagnostics';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -45,6 +47,8 @@ async function startServer() {
 
   app.get('/api/health', adaptHandler(healthHandler));
   app.put('/api/save-state', adaptHandler(saveStateHandler));
+  app.get('/api/env-check', adaptHandler(envCheckHandler));
+  app.get('/api/diagnostics', adaptHandler(diagnosticsHandler));
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== 'production') {

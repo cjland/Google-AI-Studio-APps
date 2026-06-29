@@ -20,7 +20,9 @@ import { parseCSV, formatDuration, generatePDFDoc, generateTimeOptions, parseDur
 import { SongLibrary } from './components/SongLibrary';
 import { SetListColumn } from './components/SetListColumn';
 import { Icons } from './components/ui/Icons';
-import { loadBootstrap, saveState, getGigs, createGig, updateGig, deleteGig, checkHealth } from './src/services/api';
+import { loadBootstrap, saveState, getGigs, createGig, updateGig, deleteGig, checkHealth, checkEnv, getDiagnostics } from './src/services/api';
+import { useDatabaseHealth } from './src/hooks/useDatabaseHealth';
+import { DatabaseHealthBadge } from './src/components/DatabaseHealthBadge';
 
 const dropAnimation: DropAnimation = {
   sideEffects: defaultDropAnimationSideEffects({
@@ -265,14 +267,16 @@ const BandSettingsModal = ({
     settings, 
     onSave,
     onApplyProfile,
-    onApplyGigDetails
+    onApplyGigDetails,
+    databaseHealth
 }: { 
     isOpen: boolean, 
     onClose: () => void, 
     settings: BandSettings, 
     onSave: (s: BandSettings) => void,
     onApplyProfile: (s: Partial<BandSettings>) => void,
-    onApplyGigDetails: (s: Partial<GigDetails>) => void
+    onApplyGigDetails: (s: Partial<GigDetails>) => void,
+    databaseHealth: any
 }) => {
     const [data, setData] = useState<BandSettings>(settings);
     const [memberSlots, setMemberSlots] = useState<string[]>(Array(5).fill(''));
@@ -496,6 +500,72 @@ const BandSettingsModal = ({
                         )}
                     </div>
 
+                    <div className="h-px bg-white/5 my-4"></div>
+
+                    {/* SYSTEM STATUS */}
+                    <div className="space-y-3 bg-zinc-900/40 p-4 border border-white/5 rounded-lg">
+                        <h4 className="text-xs font-bold text-zinc-500 uppercase tracking-wider">System Status</h4>
+                        
+                        <div className="space-y-2 text-xs">
+                            <div className="flex justify-between">
+                                <span className="text-zinc-400">Database variable:</span>
+                                <span className="font-semibold text-zinc-200">
+                                    {databaseHealth.health?.databaseUrlPresent !== false ? 'Detected' : 'Not detected'}
+                                </span>
+                            </div>
+                            <div className="flex justify-between">
+                                <span className="text-zinc-400">Neon connection:</span>
+                                <span className={`font-semibold ${
+                                    databaseHealth.status === 'connected' ? 'text-emerald-400' :
+                                    databaseHealth.status === 'connection-failed' ? 'text-rose-400' :
+                                    databaseHealth.status === 'variable-missing' ? 'text-amber-400' : 'text-zinc-400'
+                                }`}>
+                                    {databaseHealth.status === 'connected' && 'Connected'}
+                                    {databaseHealth.status === 'connection-failed' && 'Failed'}
+                                    {databaseHealth.status === 'variable-missing' && 'Not tested'}
+                                    {databaseHealth.status === 'checking' && 'Checking...'}
+                                    {databaseHealth.status === 'unknown' && 'Unknown'}
+                                </span>
+                            </div>
+                            <div className="flex justify-between">
+                                <span className="text-zinc-400">Environment:</span>
+                                <span className="font-semibold text-zinc-200">
+                                    {databaseHealth.health?.environment === 'production' ? 'Production' :
+                                     databaseHealth.health?.environment === 'preview' ? 'Preview' :
+                                     databaseHealth.health?.environment === 'development' ? 'Development' : 
+                                     databaseHealth.health?.environment || 'Unknown'}
+                                </span>
+                            </div>
+                            {databaseHealth.health?.region && (
+                                <div className="flex justify-between">
+                                    <span className="text-zinc-400">Region:</span>
+                                    <span className="font-semibold text-zinc-200">{databaseHealth.health.region}</span>
+                                </div>
+                            )}
+                            {databaseHealth.lastCheckedAt && (
+                                <div className="flex justify-between">
+                                    <span className="text-zinc-400">Last checked:</span>
+                                    <span className="text-zinc-400">{databaseHealth.lastCheckedAt.toLocaleTimeString()}</span>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="pt-1">
+                            <button
+                                type="button"
+                                onClick={() => databaseHealth.refreshHealth()}
+                                disabled={databaseHealth.checking}
+                                className="w-full py-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-white rounded text-xs font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                            >
+                                <Icons.Refresh size={11} className={databaseHealth.checking ? 'animate-spin' : ''} />
+                                {databaseHealth.checking ? 'Testing...' : 'Test Database Connection'}
+                            </button>
+                        </div>
+                        <p className="text-[10px] text-zinc-600 leading-normal">
+                            DATABASE_URL is configured in the Vercel project environment settings, not in this application form.
+                        </p>
+                    </div>
+
                     <div className="pt-2 flex justify-end gap-2">
                         <button onClick={onClose} className="px-4 py-2 text-sm text-zinc-400">Cancel</button>
                         <button 
@@ -570,6 +640,7 @@ const DEFAULT_GIG_DETAILS_URL = 'https://docs.google.com/spreadsheets/d/1m8sg7CR
 
 export default function App() {
   // State
+  const databaseHealth = useDatabaseHealth();
   const [bandSettings, setBandSettings] = useState<BandSettings>({
       name: 'My Band',
       logoUrl: '',
@@ -594,7 +665,17 @@ export default function App() {
   const [usage, setUsage] = useState<Record<string, any[]>>({});
 
   const [loading, setLoading] = useState(true);
-  const [errorState, setErrorState] = useState<{ message: string; detail?: string } | null>(null);
+  const [errorState, setErrorState] = useState<{
+    message: string;
+    detail?: string;
+    requestId?: string;
+    stage?: string;
+    code?: string;
+  } | null>(null);
+  const [diagnosticResult, setDiagnosticResult] = useState<any>(null);
+  const [diagnosticTitle, setDiagnosticTitle] = useState<string>('');
+  const [diagnosticOpen, setDiagnosticOpen] = useState(false);
+  const [interpretation, setInterpretation] = useState<string>('');
   const [isDirty, setIsDirty] = useState(false);
   const [saveButtonState, setSaveButtonState] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle');
   const [autosaveStatus, setAutosaveStatus] = useState<'saved' | 'saving' | 'unsaved' | 'failed'>('saved');
@@ -684,7 +765,10 @@ export default function App() {
       console.error('Failed to load setlist data:', err);
       setErrorState({
         message: 'Unable to load setlist data from Neon',
-        detail: err.message || 'Database connection error'
+        detail: err.message || 'Database connection error',
+        requestId: err.data?.requestId || err.requestId,
+        stage: err.data?.stage || err.stage,
+        code: err.data?.code || err.code
       });
     } finally {
       setLoading(false);
@@ -1354,36 +1438,185 @@ export default function App() {
 
   // Render Bootstrap Failure Error Panel
   if (errorState) {
+    const handleCheckEnv = async () => {
+      setDiagnosticTitle('Environment Check');
+      setDiagnosticOpen(true);
+      try {
+        const res = await checkEnv();
+        setDiagnosticResult(res);
+        if (res.databaseUrlPresent === false) {
+          setInterpretation('DATABASE_URL is not available to this Vercel deployment. Confirm the variable is enabled for this deployment’s environment and redeploy.');
+        } else {
+          setInterpretation('DATABASE_URL is present in the environment.');
+        }
+      } catch (e: any) {
+        const errorData = e.data || { error: e.message };
+        setDiagnosticResult(errorData);
+        setInterpretation('Failed to run environment check API. ' + e.message);
+      }
+    };
+
+    const handleCheckHealth = async () => {
+      setDiagnosticTitle('Database Health Check');
+      setDiagnosticOpen(true);
+      try {
+        const res = await checkHealth();
+        setDiagnosticResult(res);
+        if (res.ok) {
+          setInterpretation('The Neon connection works successfully.');
+        } else {
+          setInterpretation('Vercel can see DATABASE_URL, but Neon rejected or could not complete the connection.');
+        }
+      } catch (e: any) {
+        const errorData = e.data || { error: e.message };
+        setDiagnosticResult(errorData);
+        setInterpretation('Vercel can see DATABASE_URL, but Neon rejected or could not complete the connection.');
+      }
+    };
+
+    const handleGetDiagnostics = async () => {
+      setDiagnosticTitle('Diagnostics Check');
+      setDiagnosticOpen(true);
+      try {
+        const res = await getDiagnostics();
+        setDiagnosticResult(res);
+        if (res.ok) {
+          setInterpretation('All checks passed! The Neon connection works and the tables exist.');
+        } else {
+          setInterpretation('Vercel can see DATABASE_URL, but Neon rejected or could not complete the connection.');
+        }
+      } catch (e: any) {
+        const errorData = e.data || { error: e.message };
+        setDiagnosticResult(errorData);
+        if (errorData.stage) {
+          setInterpretation('The Neon connection works. The bootstrap query failed at the displayed stage.');
+        } else {
+          setInterpretation('Vercel can see DATABASE_URL, but Neon rejected or could not complete the connection.');
+        }
+      }
+    };
+
+    // Dynamically choose message based on databaseHealth
+    let healthStatusMessage = 'Retrieving connection status...';
+    if (databaseHealth.status === 'variable-missing' || databaseHealth.health?.databaseUrlPresent === false) {
+      healthStatusMessage = 'Vercel cannot see DATABASE_URL for this deployment. Confirm the variable is enabled for this deployment environment and redeploy.';
+    } else if (databaseHealth.status === 'connection-failed') {
+      healthStatusMessage = 'Vercel can see DATABASE_URL, but the Neon connection failed.';
+    } else if (databaseHealth.status === 'connected') {
+      healthStatusMessage = 'The Neon connection is healthy. The setlist query failed after connecting to the database.';
+    } else if (databaseHealth.status === 'checking') {
+      healthStatusMessage = 'Checking database connection health...';
+    } else {
+      healthStatusMessage = 'Unable to verify database health status.';
+    }
+
     return (
       <div className="min-h-screen bg-[#09090b] flex flex-col items-center justify-center p-6 text-center">
         <div className="w-16 h-16 rounded-full bg-red-950/40 border border-red-500/20 flex items-center justify-center mb-4 text-red-500">
-          <Icons.Trash size={32} />
+          <Icons.Warning size={32} />
         </div>
         <h1 className="text-2xl font-bold text-white mb-2">{errorState.message}</h1>
-        <p className="text-zinc-500 max-w-lg mb-6 text-sm leading-relaxed">
-          {errorState.detail}. Verify that your `DATABASE_URL` is set in the Settings menu and that the Neon database is online.
+        
+        <p className="text-zinc-400 max-w-lg mb-6 text-sm leading-relaxed">
+          {healthStatusMessage}
         </p>
-        <div className="flex gap-4">
+
+        {/* Diagnostic Metadata Grid */}
+        <div className="mb-6 p-4 bg-zinc-950 border border-zinc-800 rounded-lg max-w-lg text-left w-full space-y-2 text-xs">
+          <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2">Diagnostic Identifiers</h3>
+          {databaseHealth.health?.requestId && (
+            <div className="flex justify-between font-mono">
+              <span className="text-zinc-500">Health Check Request ID:</span>
+              <span className="text-zinc-300 select-all">{databaseHealth.health.requestId}</span>
+            </div>
+          )}
+          {errorState.requestId && (
+            <div className="flex justify-between font-mono">
+              <span className="text-zinc-500">Bootstrap Request ID:</span>
+              <span className="text-zinc-300 select-all">{errorState.requestId}</span>
+            </div>
+          )}
+          {errorState.stage && (
+            <div className="flex justify-between">
+              <span className="text-zinc-500">Bootstrap Stage:</span>
+              <span className="text-zinc-300 font-semibold">{errorState.stage}</span>
+            </div>
+          )}
+          {(errorState.code || databaseHealth.health?.code) && (
+            <div className="flex justify-between font-mono">
+              <span className="text-zinc-500">PostgreSQL Code:</span>
+              <span className="text-zinc-300 font-semibold">{errorState.code || databaseHealth.health?.code}</span>
+            </div>
+          )}
+          <div className="flex justify-between font-mono">
+            <span className="text-zinc-500">HTTP Detail:</span>
+            <span className="text-zinc-400 truncate max-w-xs">{errorState.detail}</span>
+          </div>
+        </div>
+
+        {interpretation && (
+          <div className="mb-6 p-4 bg-zinc-900 border border-zinc-800 rounded-lg max-w-lg text-left w-full">
+            <div className="flex items-start gap-2.5">
+              <Icons.Info size={16} className="text-indigo-400 shrink-0 mt-0.5" />
+              <div>
+                <h4 className="text-xs font-bold text-zinc-300 uppercase tracking-wider mb-1">Result Analysis</h4>
+                <p className="text-sm text-zinc-200 font-medium">{interpretation}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="flex flex-wrap gap-4 justify-center mb-6 max-w-2xl">
           <button
-            onClick={() => loadData()}
-            className="px-6 py-2 bg-zinc-800 text-zinc-200 hover:text-white hover:bg-zinc-700 rounded-lg text-sm font-medium transition-all"
-          >
-            Retry Connection
-          </button>
-          <button
-            onClick={async () => {
-              try {
-                const check = await checkHealth();
-                alert(check.status === 'ok' ? 'Database connection check: SUCCESSFUL' : 'Database health error');
-              } catch (e: any) {
-                alert('Database health check FAILED: ' + e.message);
-              }
+            onClick={() => {
+              setInterpretation('');
+              setDiagnosticResult(null);
+              setDiagnosticOpen(false);
+              loadData();
             }}
-            className="px-6 py-2 bg-primary/20 text-primary hover:bg-primary/30 rounded-lg text-sm font-medium transition-all border border-primary/20"
+            className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-all"
+          >
+            Retry Load
+          </button>
+          
+          <button
+            onClick={handleCheckEnv}
+            className="px-5 py-2 bg-zinc-800 text-zinc-200 hover:text-white hover:bg-zinc-700 rounded-lg text-sm font-medium transition-all"
+          >
+            Check Environment
+          </button>
+
+          <button
+            onClick={handleCheckHealth}
+            className="px-5 py-2 bg-zinc-800 text-zinc-200 hover:text-white hover:bg-zinc-700 rounded-lg text-sm font-medium transition-all"
           >
             Test Database Health
           </button>
+
+          <button
+            onClick={handleGetDiagnostics}
+            className="px-5 py-2 bg-zinc-800 text-zinc-200 hover:text-white hover:bg-zinc-700 rounded-lg text-sm font-medium transition-all"
+          >
+            Open Diagnostics
+          </button>
         </div>
+
+        {diagnosticOpen && diagnosticResult && (
+          <div className="w-full max-w-2xl bg-zinc-950 border border-zinc-800 rounded-lg text-left overflow-hidden mb-6">
+            <div className="flex items-center justify-between px-4 py-2.5 bg-zinc-900 border-b border-zinc-800">
+              <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider">{diagnosticTitle} API JSON Response</span>
+              <button 
+                onClick={() => setDiagnosticOpen(false)}
+                className="text-zinc-500 hover:text-zinc-300 transition-colors"
+              >
+                <Icons.Close size={14} />
+              </button>
+            </div>
+            <pre className="p-4 text-xs font-mono text-zinc-300 overflow-auto max-h-72 whitespace-pre-wrap leading-relaxed">
+              {JSON.stringify(diagnosticResult, null, 2)}
+            </pre>
+          </div>
+        )}
       </div>
     );
   }
@@ -1456,6 +1689,9 @@ export default function App() {
               </div>
 
               <div className="flex items-center gap-2">
+                  {/* Database Health Badge */}
+                  <DatabaseHealthBadge healthResult={databaseHealth} />
+
                   {/* Autosave Status Badge */}
                   <div className="flex items-center gap-1.5 px-2.5 py-1 bg-black/40 rounded-full border border-white/5 text-[10px] font-medium mr-2">
                     {autosaveStatus === 'saving' && (

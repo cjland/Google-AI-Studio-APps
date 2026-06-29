@@ -3,8 +3,9 @@ import { Pool } from '@neondatabase/serverless';
 import { v4 as uuidv4 } from 'uuid';
 import { getCurrentBand } from './_lib/currentBand';
 import { mapSong, mapGig, mapGigSet, mapSetSongPlacement } from './_lib/mappers';
+import { getSql } from './_lib/db';
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+let pool: Pool | null = null;
 
 function isValidUUID(val: string): boolean {
   if (!val) return false;
@@ -49,6 +50,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
+  const sql = getSql();
+  if (!pool) {
+    pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  }
   const client = await pool.connect();
 
   try {

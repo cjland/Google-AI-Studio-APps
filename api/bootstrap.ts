@@ -1,15 +1,27 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { sql } from './_lib/db';
+import { randomUUID } from 'node:crypto';
+import { getSql } from './_lib/db';
 import { getCurrentBand } from './_lib/currentBand';
 import { mapSong, mapGig, mapGigSet, mapSetSongPlacement } from './_lib/mappers';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const requestId = randomUUID();
+  let stage = 'start';
+
   if (req.method !== 'GET') {
     res.setHeader('Allow', ['GET']);
-    return res.status(405).json({ error: 'Method Not Allowed', detail: 'Only GET requests are allowed on this endpoint' });
+    return res.status(405).json({
+      ok: false,
+      error: 'Method Not Allowed',
+      requestId,
+      stage
+    });
   }
 
   try {
+    const sql = getSql();
+
+    stage = 'resolve-band';
     const band = await getCurrentBand();
 
     if (!band) {
@@ -26,7 +38,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const gigId = req.query.gigId as string | undefined;
 
-    // 1. Fetch Songs
+    stage = 'load-songs';
     const songRows = await sql`
       SELECT *
       FROM songs
@@ -36,7 +48,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     `;
     const songs = songRows.map(mapSong);
 
-    // 2. Fetch Gigs with setCount, songCount, totalDurationSeconds
+    stage = 'load-gigs';
     const gigRows = await sql`
       SELECT g.*,
         (SELECT COUNT(*)::int FROM gig_sets s WHERE s.gig_id = g.id) AS set_count,
@@ -54,7 +66,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const gigs = gigRows.map(mapGig);
 
     // Order Gigs: Upcoming ascending by date, past descending by date, null dates last
-    const nowStr = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const nowStr = new Date().toISOString().split('T')[0];
     const sortedGigs = gigs.sort((a, b) => {
       const dateA = a.gigDate;
       const dateB = b.gigDate;
@@ -76,7 +88,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return isUpcomingA ? -1 : 1;
     });
 
-    // 3. Resolve active gig
+    stage = 'resolve-active-gig';
     let activeGig = null;
     if (gigId) {
       activeGig = sortedGigs.find(g => g.id === gigId) || null;
@@ -98,7 +110,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    // 4. If no active gig (no gigs exist at all)
     if (!activeGig) {
       return res.status(200).json({
         band,
@@ -110,7 +121,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    // 5. Fetch Sets of the active gig
+    stage = 'load-sets';
     const setRows = await sql`
       SELECT *
       FROM gig_sets
@@ -119,17 +130,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     `;
     const sets = setRows.map(mapGigSet);
 
-    // 6. Fetch all Placements for those sets
-    let placements: any[] = [];
-    if (sets.length > 0) {
-      const setIds = sets.map(s => s.id);
-      const placementRows = await sql`
-        SELECT 
+    stage = 'load-placements';
+    const placementRows: any[] = [];
+    for (const set of sets) {
+      const rows = await sql`
+        SELECT
           ss.id AS set_song_id,
           ss.set_id,
           ss.song_id,
           ss.position,
-          ss.notes,
+          ss.notes AS placement_notes,
           s.title,
           s.artist,
           s.duration_seconds,
@@ -142,44 +152,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           s.notes AS song_notes,
           s.status
         FROM set_songs ss
-        JOIN songs s ON ss.song_id = s.id
-        WHERE ss.set_id = ANY(${setIds})
+        JOIN songs s
+          ON s.id = ss.song_id
+        WHERE ss.set_id = ${set.id}
         ORDER BY ss.position ASC
       `;
-      placements = placementRows.map(mapSetSongPlacement);
+      placementRows.push(...rows);
     }
+    const placements = placementRows.map(mapSetSongPlacement);
 
-    // Map placements to sets
-    const setMap = new Map<string, any[]>();
-    sets.forEach(s => setMap.set(s.id, []));
-    placements.forEach(p => {
-      const setList = setMap.get(p.setId || p.notes); // Wait, where is set_id in mapped placement?
-      // Ah! In mapSetSongPlacement we mapped fields but let's make sure we include set_id in the row, or map it.
-      // Let's look at mapSetSongPlacement:
-      // It returns: instanceId, songId, position, notes, title, artist, durationSeconds...
-      // Let's add setId or keep it.
-    });
-
-    // Wait! Let's modify mapSetSongPlacement to include setId! Or we can extract set_id directly from the row.
-    // Yes, let's include setId: row.set_id in the mapped result or mapSetSongPlacement. Let's do that!
-    // Let's double check if we can write a custom mapper or update mappers.ts if needed.
-    // Wait, let's look at mapSetSongPlacement. Yes, we did:
-    // row.set_id is in the query select clause! So we can include: setId: row.set_id inside the returned object, which is very helpful!
-    // Wait, the prompt lists the exact fields a placement MUST include:
-    // "instanceId, songId, notes, position, title, artist, durationSeconds, videoUrl, tags, rating, playedLive, guitarLessonUrl, bassLessonUrl, lyricsUrl, generalNotes, practiceStatus"
-    // It's perfectly fine to add `setId: row.set_id` as well to help with internal grouping!
-    
-    // Let's adjust mappers.ts to include `setId: row.set_id` to be absolutely clean, or we can just access it.
-    // Wait, let's look at `/api/_lib/mappers.ts` - does it have `row.set_id`?
-    // Let's view `api/_lib/mappers.ts`. Yes, we can see that `mapSetSongPlacement` doesn't include `setId`. Let's add it.
-    // Wait, let's just group placements in `api/bootstrap.ts` by checking the row's `set_id` directly, before calling `mapSetSongPlacement`!
-    // That's even cleaner and doesn't change the strict mapped schema of `SetSong` if we want to be safe!
-    // Let's see: we can do:
-    // `const mapped = mapSetSongPlacement(row);`
-    // `mapped.setId = row.set_id;` or similar.
-    // That is incredibly elegant and safe!
-
-    // 7. Calculate usage grouping only for the active gig
+    stage = 'load-usage';
     const usageRows = await sql`
       SELECT 
         ss.song_id,
@@ -208,11 +190,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    // Now group placements into sets
+    stage = 'build-response';
     const setsWithSongs = sets.map(s => {
       const setPlacements = placements
-        .filter((p: any) => p.setId === s.id)
-        .map(({ setId, ...rest }) => rest); // Remove temporary grouping field if desired
+        .filter((p: any) => p.setId === s.id);
       return {
         ...s,
         songs: setPlacements
@@ -231,8 +212,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } catch (error: any) {
     console.error('Bootstrap failed:', error);
     return res.status(500).json({
-      error: 'Internal Server Error',
-      detail: error.message || 'Failed to bootstrap application data'
+      ok: false,
+      error: 'Unable to load setlist data.',
+      requestId,
+      stage,
+      code: error?.code ?? null,
+      message: error?.message ?? null,
+      detail: error?.detail ?? null
     });
   }
 }

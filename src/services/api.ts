@@ -16,14 +16,70 @@ async function handleResponse(response: Response) {
   if (!response.ok) {
     // Return a human-readable, user-friendly message
     const errorMsg = json?.detail || json?.error || `Request failed with status ${response.status}`;
-    throw new Error(errorMsg);
+    const error = new Error(errorMsg) as any;
+    error.status = response.status;
+    error.data = json;
+    throw error;
   }
 
   return json;
 }
 
+export type DatabaseHealthStatus =
+  | 'checking'
+  | 'connected'
+  | 'variable-missing'
+  | 'connection-failed'
+  | 'unknown';
+
+export interface DatabaseHealthResponse {
+  ok: boolean;
+  status: DatabaseHealthStatus;
+  databaseUrlPresent?: boolean;
+  database?: string;
+  databaseTime?: string | null;
+  environment?: string | null;
+  region?: string | null;
+  deploymentId?: string | null;
+  requestId?: string;
+  code?: string | null;
+  error?: string | null;
+}
+
+export async function checkDatabaseHealth(): Promise<DatabaseHealthResponse> {
+  const response = await fetch('/api/health', {
+    method: 'GET',
+    headers: {
+      Accept: 'application/json'
+    },
+    cache: 'no-store'
+  });
+
+  let payload: DatabaseHealthResponse;
+
+  try {
+    payload = await response.json();
+  } catch {
+    throw new Error(
+      `Database health returned a non-JSON response with status ${response.status}.`
+    );
+  }
+
+  return payload;
+}
+
 export async function checkHealth() {
   const res = await fetch('/api/health');
+  return handleResponse(res);
+}
+
+export async function checkEnv() {
+  const res = await fetch('/api/env-check');
+  return handleResponse(res);
+}
+
+export async function getDiagnostics() {
+  const res = await fetch('/api/diagnostics');
   return handleResponse(res);
 }
 

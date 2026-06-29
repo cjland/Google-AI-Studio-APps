@@ -1,7 +1,8 @@
-import { sql } from './db';
+import { getSql } from './db';
 import { mapBand } from './mappers';
 
 export async function getCurrentBand() {
+  const sql = getSql();
   const rows = await sql`
     SELECT id, name, created_at, updated_at
     FROM bands
