@@ -196,10 +196,21 @@ export async function loadBootstrap(gigId?: string) {
   return handleResponse(res);
 }
 
+export interface SaveStateGigPayload {
+  id: string;
+  name: string;
+  location: string;
+  gigDate: string;
+  startTime: string;
+  arriveTime?: string;
+  notes?: string;
+  status?: string;
+}
+
 export interface SaveStatePayload {
   bandSettings: BandSettings;
   songs: Song[];
-  gig: GigDetails & { id: string; status?: string };
+  gig: SaveStateGigPayload;
   sets: SetList[];
 }
 
@@ -211,7 +222,24 @@ export async function saveState(payload: SaveStatePayload) {
     },
     body: JSON.stringify(payload),
   });
-  return handleResponse(res);
+  
+  const text = await res.text();
+  let parsed: any;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    parsed = { rawResponse: text };
+  }
+
+  if (!res.ok) {
+    const msg = parsed.message || parsed.error || parsed.detail || `Save state failed with status ${res.status}`;
+    const detailedMsg = typeof msg === 'string' ? msg : JSON.stringify(msg);
+    const stagePrefix = parsed.stage ? `[Stage: ${parsed.stage}] ` : '';
+    const codeSuffix = parsed.code ? ` (Code: ${parsed.code})` : '';
+    const detailSuffix = parsed.detail ? ` - Detail: ${typeof parsed.detail === 'string' ? parsed.detail : JSON.stringify(parsed.detail)}` : '';
+    throw new Error(`${stagePrefix}${detailedMsg}${codeSuffix}${detailSuffix}`);
+  }
+  return parsed;
 }
 
 export async function getGigs() {

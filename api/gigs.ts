@@ -15,9 +15,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!pool) {
     pool = new Pool({ connectionString: process.env.DATABASE_URL });
   }
-  const client = await pool.connect();
+  
+  let client: any = null;
 
   try {
+    client = await pool.connect();
     const band = await getCurrentBand();
     if (!band) {
       return res.status(200).json({
@@ -202,7 +204,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method Not Allowed', detail: `Method ${method} not allowed on this endpoint` });
 
   } catch (error: any) {
-    if (method === 'POST' || method === 'DELETE') {
+    if (client && (method === 'POST' || method === 'DELETE')) {
       try {
         await client.query('ROLLBACK');
       } catch (rbErr) {
@@ -216,6 +218,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       detail: error.message || 'Failed to complete gigs operation'
     });
   } finally {
-    client.release();
+    if (client) {
+      client.release();
+    }
   }
 }

@@ -26,36 +26,80 @@ function isValidUUID(val: string): boolean {
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'PUT') {
     res.setHeader('Allow', ['PUT']);
-    return res.status(405).json({ error: 'Method Not Allowed', detail: 'Only PUT requests are allowed on this endpoint' });
+    return res.status(405).json({
+      ok: false,
+      stage: 'validate-payload',
+      message: 'Method Not Allowed',
+      code: 'METHOD_NOT_ALLOWED',
+      detail: 'Only PUT requests are allowed on this endpoint'
+    });
   }
+
+  let currentStage = 'validate-payload';
 
   const { bandSettings, songs, gig, sets } = req.body || {};
 
   // --- VALIDATION ---
   if (!bandSettings || !songs || !gig || !sets) {
-    return res.status(400).json({ error: 'Bad Request', detail: 'Missing required state fields in request body' });
+    return res.status(400).json({
+      ok: false,
+      stage: 'validate-payload',
+      message: 'Bad Request',
+      code: 'MISSING_PAYLOAD',
+      detail: 'Missing required state fields in request body'
+    });
   }
 
   // Validate titles and names are non-empty
   if (!bandSettings.name || !bandSettings.name.trim()) {
-    return res.status(400).json({ error: 'Bad Request', detail: 'Band name cannot be empty' });
+    return res.status(400).json({
+      ok: false,
+      stage: 'validate-payload',
+      message: 'Bad Request',
+      code: 'EMPTY_BAND_NAME',
+      detail: 'Band name cannot be empty'
+    });
   }
   if (!gig.name || !gig.name.trim()) {
-    return res.status(400).json({ error: 'Bad Request', detail: 'Gig name cannot be empty' });
+    return res.status(400).json({
+      ok: false,
+      stage: 'validate-payload',
+      message: 'Bad Request',
+      code: 'EMPTY_GIG_NAME',
+      detail: 'Gig name cannot be empty'
+    });
   }
 
   // Validate ratings and durations
   for (const song of songs) {
     if (!song.title || !song.title.trim()) {
-      return res.status(400).json({ error: 'Bad Request', detail: 'Song title cannot be empty' });
+      return res.status(400).json({
+        ok: false,
+        stage: 'validate-payload',
+        message: 'Bad Request',
+        code: 'EMPTY_SONG_TITLE',
+        detail: 'Song title cannot be empty'
+      });
     }
     if (song.durationSeconds < 0) {
-      return res.status(400).json({ error: 'Bad Request', detail: `Duration for song "${song.title}" must be non-negative` });
+      return res.status(400).json({
+        ok: false,
+        stage: 'validate-payload',
+        message: 'Bad Request',
+        code: 'INVALID_SONG_DURATION',
+        detail: `Duration for song "${song.title}" must be non-negative`
+      });
     }
     if (song.rating !== undefined && song.rating !== null) {
       const ratingNum = Number(song.rating);
       if (isNaN(ratingNum) || ratingNum < 1 || ratingNum > 5) {
-        return res.status(400).json({ error: 'Bad Request', detail: `Rating for song "${song.title}" must be between 1 and 5` });
+        return res.status(400).json({
+          ok: false,
+          stage: 'validate-payload',
+          message: 'Bad Request',
+          code: 'INVALID_SONG_RATING',
+          detail: `Rating for song "${song.title}" must be between 1 and 5`
+        });
       }
     }
   }
@@ -64,23 +108,70 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!pool) {
     pool = new Pool({ connectionString: process.env.DATABASE_URL });
   }
-  const client = await pool.connect();
+
+  let client: any = null;
 
   try {
     // 1. Resolve current band first to verify ownership
+    currentStage = 'load-band';
     const band = await getCurrentBand();
     if (!band) {
-      return res.status(400).json({ error: 'Setup Required', detail: 'No active band found. Please configure a band first.' });
+      return res.status(400).json({
+        ok: false,
+        stage: 'load-band',
+        message: 'No active band found. Please configure a band first.',
+        code: 'NO_ACTIVE_BAND',
+        detail: 'Setup Required'
+      });
     }
 
-    // --- ID NORMALIZATION MAPS ---
+    // --- ID PREP & NORMALIZATION MAPS ---
     const songIdMap: Record<string, string> = {};
     const setIdMap: Record<string, string> = {};
+    const activeSetIds: string[] = [];
+    const activePlacementIds: string[] = [];
+    const placementIdMap: Record<string, string> = {}; // original placement instanceId -> final placement instanceId
+
+    for (const song of songs) {
+      let finalSongId = song.id;
+      if (!isValidUUID(song.id)) {
+        finalSongId = uuidv4();
+      }
+      songIdMap[song.id] = finalSongId;
+    }
+
+    for (let i = 0; i < sets.length; i++) {
+      const setItem = sets[i];
+      let finalSetId = setItem.id;
+      if (!isValidUUID(setItem.id)) {
+        finalSetId = uuidv4();
+      }
+      setIdMap[setItem.id] = finalSetId;
+      activeSetIds.push(finalSetId);
+
+      const placementSongs = setItem.songs || [];
+      for (const pSong of placementSongs) {
+        let finalPlacementId = pSong.instanceId;
+        if (!isValidUUID(pSong.instanceId)) {
+          finalPlacementId = uuidv4();
+        }
+        placementIdMap[pSong.instanceId] = finalPlacementId;
+        activePlacementIds.push(finalPlacementId);
+      }
+    }
+
+    let finalGigId = gig.id;
+    if (!isValidUUID(gig.id)) {
+      finalGigId = uuidv4();
+    }
+
+    client = await pool.connect();
 
     // Begin Transaction
     await client.query('BEGIN');
 
     // 2. Update Band
+    currentStage = 'save-band';
     const bandResult = await client.query(
       `UPDATE public.bands
        SET
@@ -122,14 +213,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const savedBand = mapBand(bandResult.rows[0]);
 
     // 3. Upsert Songs
+    currentStage = 'upsert-songs';
     const dbSongs: any[] = [];
     for (const song of songs) {
-      let finalSongId = song.id;
-      if (!isValidUUID(song.id)) {
-        finalSongId = uuidv4();
-      }
-      songIdMap[song.id] = finalSongId;
-
+      const finalSongId = songIdMap[song.id];
       const duration = Number(song.durationSeconds) || 0;
       const rating = song.rating ? Number(song.rating) : null;
       const tags = Array.isArray(song.tags) ? song.tags : [];
@@ -175,12 +262,42 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       dbSongs.push(mapSong(sRes.rows[0]));
     }
 
-    // 4. Upsert Gig
-    let finalGigId = gig.id;
-    if (!isValidUUID(gig.id)) {
-      finalGigId = uuidv4();
+    // 6. Delete placements/sets removed from submitted sets/gig
+    currentStage = 'delete-removed-songs';
+    if (activeSetIds.length > 0) {
+      if (activePlacementIds.length > 0) {
+        await client.query(
+          `DELETE FROM set_songs 
+           WHERE set_id = ANY($1) 
+             AND id <> ALL($2)`,
+          [activeSetIds, activePlacementIds]
+        );
+      } else {
+        await client.query(
+          `DELETE FROM set_songs 
+           WHERE set_id = ANY($1)`,
+          [activeSetIds]
+        );
+      }
     }
 
+    if (activeSetIds.length > 0) {
+      await client.query(
+        `DELETE FROM gig_sets 
+         WHERE gig_id = $1 
+           AND id <> ALL($2)`,
+        [finalGigId, activeSetIds]
+      );
+    } else {
+      await client.query(
+        `DELETE FROM gig_sets 
+         WHERE gig_id = $1`,
+        [finalGigId]
+      );
+    }
+
+    // 4. Upsert Gig
+    currentStage = 'save-gig';
     const gRes = await client.query(
       `INSERT INTO gigs (
         id, band_id, name, location, gig_date, start_time, arrival_time, notes, status, updated_at
@@ -212,18 +329,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const dbGig = mapGig(gRes.rows[0]);
 
     // 5. Upsert sets
+    currentStage = 'save-sets';
     const dbSets: any[] = [];
-    const activeSetIds: string[] = [];
-    const activePlacementIds: string[] = [];
-
     for (let i = 0; i < sets.length; i++) {
       const setItem = sets[i];
-      let finalSetId = setItem.id;
-      if (!isValidUUID(setItem.id)) {
-        finalSetId = uuidv4();
-      }
-      setIdMap[setItem.id] = finalSetId;
-      activeSetIds.push(finalSetId);
+      const finalSetId = setIdMap[setItem.id];
 
       const setNumber = setItem.setNumber || (i + 1);
       const sortOrder = setItem.sortOrder !== undefined ? setItem.sortOrder : (i + 1);
@@ -254,20 +364,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ]
       );
       const mappedSet = mapGigSet(setRes.rows[0]);
+      dbSets.push({ ...mappedSet, setItemSongs: setItem.songs || [] });
+    }
 
-      // Placements in this set
-      const placementSongs = setItem.songs || [];
+    // 5b. Upsert set song placements
+    currentStage = 'save-placements';
+    let totalPlacementsSaved = 0;
+    const finalSetsResponse: any[] = [];
+
+    for (const mappedSet of dbSets) {
+      const finalSetId = mappedSet.id;
+      const placementSongs = mappedSet.setItemSongs;
       const mappedSongsList: any[] = [];
 
       for (let pIdx = 0; pIdx < placementSongs.length; pIdx++) {
         const pSong = placementSongs[pIdx];
-        let finalPlacementId = pSong.instanceId;
-        if (!isValidUUID(pSong.instanceId)) {
-          finalPlacementId = uuidv4();
-        }
-        activePlacementIds.push(finalPlacementId);
-
-        // Resolve the real song UUID
+        const finalPlacementId = placementIdMap[pSong.instanceId];
         const realSongId = songIdMap[pSong.songId] || pSong.songId;
 
         const pRes = await client.query(
@@ -292,9 +404,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           ]
         );
 
-        // Map the stored placement and pair it with song details
+        totalPlacementsSaved++;
+
         const storedPlacement = pRes.rows[0];
-        // Find corresponding song in dbSongs list
         const songDetail = dbSongs.find(s => s.id === realSongId);
 
         mappedSongsList.push({
@@ -317,48 +429,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
       }
 
+      delete mappedSet.setItemSongs;
       mappedSet.songs = mappedSongsList;
-      dbSets.push(mappedSet);
+      finalSetsResponse.push(mappedSet);
     }
 
-    // 6. Delete placements removed from submitted sets
-    if (activeSetIds.length > 0) {
-      if (activePlacementIds.length > 0) {
-        await client.query(
-          `DELETE FROM set_songs 
-           WHERE set_id = ANY($1) 
-             AND id <> ALL($2)`,
-          [activeSetIds, activePlacementIds]
-        );
-      } else {
-        await client.query(
-          `DELETE FROM set_songs 
-           WHERE set_id = ANY($1)`,
-          [activeSetIds]
-        );
-      }
-    }
-
-    // 7. Delete sets removed from the submitted gig
-    if (activeSetIds.length > 0) {
-      await client.query(
-        `DELETE FROM gig_sets 
-         WHERE gig_id = $1 
-           AND id <> ALL($2)`,
-        [finalGigId, activeSetIds]
-      );
-    } else {
-      await client.query(
-        `DELETE FROM gig_sets 
-         WHERE gig_id = $1`,
-        [finalGigId]
-      );
-    }
+    // 8. Fetch updated Usage Map
+    currentStage = 'build-response';
 
     // Commit Transaction
     await client.query('COMMIT');
 
-    // 8. Fetch updated Usage Map
     const usageRows = await client.query(
       `SELECT 
         ss.song_id,
@@ -390,28 +471,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     return res.status(200).json({
       ok: true,
+      savedSongCount: dbSongs.length,
+      savedSetCount: finalSetsResponse.length,
+      savedPlacementCount: totalPlacementsSaved,
       band: savedBand,
       songs: dbSongs,
       gig: dbGig,
-      sets: dbSets,
+      sets: finalSetsResponse,
       usage,
       savedAt: new Date().toISOString()
     });
 
   } catch (error: any) {
-    // Rollback Transaction
-    try {
-      await client.query('ROLLBACK');
-    } catch (rbErr) {
-      console.error('Rollback failed:', rbErr);
+    if (client) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rbErr) {
+        console.error('Rollback failed:', rbErr);
+      }
     }
 
-    console.error('Save state failed:', error);
+    console.error(`Save state failed at stage "${currentStage}":`, error);
     return res.status(500).json({
-      error: 'Internal Server Error',
-      detail: error.message || 'Failed to save application state'
+      ok: false,
+      stage: currentStage,
+      message: error.message || 'Failed to save application state',
+      code: error.code || 'SAVE_STATE_ERROR',
+      detail: error.detail || error.stack || null
     });
   } finally {
-    client.release();
+    if (client) {
+      client.release();
+    }
   }
 }

@@ -840,6 +840,8 @@ export default function App() {
   const [showBandSettings, setShowBandSettings] = useState(false);
   const [showPDFOptions, setShowPDFOptions] = useState(false);
   const [importText, setImportText] = useState('');
+  const [importSaveStatus, setImportSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle');
+  const [importSaveError, setImportSaveError] = useState<string>('');
   
   const [editingSong, setEditingSong] = useState<Song | null>(null);
   const [confirmState, setConfirmState] = useState<ConfirmationState | null>(null);
@@ -1228,6 +1230,43 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [isDirty, sets, songs, gigDetails, bandSettings, isInitialized, setupRequired]);
 
+  // Save when the song list changes and dirty is true, ensuring the save payload uses the latest songs state
+  useEffect(() => {
+    if (
+      isDirty &&
+      songs.length > 0 &&
+      isInitialized &&
+      !setupRequired &&
+      gigDetails.id &&
+      importSaveStatus !== 'saving' &&
+      !saveInProgressRef.current
+    ) {
+      const triggerSongChangeSave = async () => {
+        try {
+          const payload = {
+            bandSettings: saveStateRef.current.bandSettings,
+            songs, // latest songs state
+            gig: {
+              id: saveStateRef.current.gigDetails.id,
+              name: saveStateRef.current.gigDetails.name,
+              location: saveStateRef.current.gigDetails.location,
+              gigDate: saveStateRef.current.gigDetails.date,
+              startTime: saveStateRef.current.gigDetails.startTime,
+              arriveTime: saveStateRef.current.gigDetails.arriveTime,
+              notes: saveStateRef.current.gigDetails.notes,
+              status: saveStateRef.current.gigDetails.status
+            },
+            sets: saveStateRef.current.sets
+          };
+          await saveChanges(payload);
+        } catch (error) {
+          console.error('Immediate song list change save failed:', error);
+        }
+      };
+      triggerSongChangeSave();
+    }
+  }, [songs, importSaveStatus, isDirty, isInitialized, setupRequired, gigDetails.id]);
+
   // Duplicate song ids computation
   const duplicateSongIds = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -1416,10 +1455,12 @@ export default function App() {
 
 
 
-const handleImportSongsMatch = (
+const handleImportSongsMatch = async (
   incoming: Song[],
   mode: 'add' | 'replace'
-): boolean => {
+): Promise<boolean> => {
+  setImportSaveStatus('saving');
+  setImportSaveError('');
   try {
     console.log(
       'IMPORT_MATCH_STARTED',
@@ -1692,8 +1733,75 @@ const handleImportSongsMatch = (
     setSongs(updatedSongs);
     markDirty();
 
-    return true;
-  } catch (error) {
+    const savePayload = {
+      bandSettings,
+      songs: updatedSongs,
+      gig: {
+        id: gigDetails.id,
+        name: gigDetails.name,
+        location: gigDetails.location,
+        gigDate: gigDetails.date,
+        startTime: gigDetails.startTime,
+        arriveTime: gigDetails.arriveTime,
+        notes: gigDetails.notes,
+        status: gigDetails.status
+      },
+      sets
+    };
+
+    setSaveButtonState('saving');
+    setAutosaveStatus('saving');
+
+    const response = await saveState(savePayload);
+
+    if (response.ok) {
+      if (response.band) {
+        setBandSettings({
+          name: response.band.name || 'My Band',
+          logoUrl: response.band.logoUrl || '',
+          members: Array.isArray(response.band.members) ? response.band.members : [],
+          defaultLibraryUrl: response.band.defaultLibraryUrl || '',
+          bandProfileUrl: response.band.bandProfileUrl || '',
+          gigDetailsUrl: response.band.gigDetailsUrl || ''
+        });
+      }
+      if (response.songs) setSongs(response.songs);
+      if (response.gig) {
+        setGigDetails({
+          id: response.gig.id,
+          name: response.gig.name,
+          location: response.gig.location,
+          date: response.gig.gigDate,
+          startTime: response.gig.startTime,
+          arriveTime: response.gig.arriveTime,
+          notes: response.gig.notes,
+          status: response.gig.status
+        });
+        localStorage.setItem('active-gig-id', response.gig.id);
+      }
+      if (response.sets) setSets(response.sets);
+      if (response.usage) setUsage(response.usage);
+
+      const updatedGigs = await getGigs();
+      setGigs(updatedGigs);
+
+      setIsDirty(false);
+      setAutosaveStatus('saved');
+      setSaveButtonState('saved');
+      setTimeout(() => setSaveButtonState('idle'), 2000);
+
+      setImportSaveStatus('saved');
+      setTimeout(() => {
+        setShowImport(false);
+        setImportText('');
+        setImportSaveStatus('idle');
+      }, 2000);
+
+      return true;
+    } else {
+      throw new Error(response.detail || 'Save failed');
+    }
+  } catch (error: any) {
     console.error(
       'Song import matching failed',
       error
@@ -1704,9 +1812,8 @@ const handleImportSongsMatch = (
         ? error.message
         : 'Unexpected song import error';
 
-    alert(
-      `Song import failed: ${message}`
-    );
+    setImportSaveError(message);
+    setImportSaveStatus('failed');
 
     return false;
   }
@@ -1718,7 +1825,7 @@ const handleImportSongsMatch = (
 
 
 
-  const handleImport = (mode: 'add' | 'replace') => {
+  const handleImport = async (mode: 'add' | 'replace') => {
     const newSongs = parseCSV(importText);
     
     if (newSongs.length === 0) {
@@ -1736,9 +1843,7 @@ const handleImportSongsMatch = (
             data: { newSongs }
          });
     } else {
-        handleImportSongsMatch(newSongs, 'add');
-        setShowImport(false);
-        setImportText('');
+        await handleImportSongsMatch(newSongs, 'add');
     }
   };
 
@@ -1752,7 +1857,7 @@ const handleImportSongsMatch = (
     });
   };
 
-  const handleConfirmAction = () => {
+  const handleConfirmAction = async () => {
     if (!confirmState) {
       return;
     }
@@ -1806,7 +1911,7 @@ const handleImportSongsMatch = (
         }
 
         const succeeded =
-          handleImportSongsMatch(
+          await handleImportSongsMatch(
             newSongs,
             'replace'
           );
@@ -1816,9 +1921,6 @@ const handleImportSongsMatch = (
             'Song matching returned an unsuccessful result.'
           );
         }
-
-        setShowImport(false);
-        setImportText('');
       } else if (
         currentConfirmation.type ===
         'CLEAR_LIBRARY'
@@ -2252,6 +2354,8 @@ Deployment ID: ${deploymentId}`;
       navigator.clipboard.writeText(text).then(() => {
         setCopiedDiagnostics(true);
         setTimeout(() => setCopiedDiagnostics(false), 2000);
+      }).catch((err) => {
+        console.warn('Clipboard write failed, likely due to iframe permissions:', err);
       });
     };
 
@@ -2878,7 +2982,7 @@ Deployment ID: ${deploymentId}`;
                                           markDirty();
                                       }}
                                    >
-                                       {timeOptions.map(t => <option key={t} value={t}>{t}</option>)}
+                                       {timeOptions.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
                                    </select>
                                 </div>
                                 <div>
@@ -2891,7 +2995,7 @@ Deployment ID: ${deploymentId}`;
                                           markDirty();
                                       }}
                                    >
-                                       {timeOptions.map(t => <option key={t} value={t}>{t}</option>)}
+                                       {timeOptions.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
                                    </select>
                                 </div>
                            </div>
@@ -2914,7 +3018,12 @@ Deployment ID: ${deploymentId}`;
                                <button 
                                   onClick={async () => {
                                     if (window.confirm("Are you sure you want to delete this gig entirely? This will also cascade to all of its sets!")) {
-                                      await deleteGig(gigDetails.id);
+                                      try {
+                                        await deleteGig(gigDetails.id);
+                                      } catch (err: any) {
+                                        console.error("Failed to delete gig:", err);
+                                        alert("Failed to delete gig: " + (err.message || String(err)));
+                                      }
                                       setShowGigDetails(false);
                                       loadData();
                                     }
@@ -3019,6 +3128,29 @@ Deployment ID: ${deploymentId}`;
                              className="w-full bg-background border border-zinc-800 rounded-lg p-4 text-xs font-mono text-zinc-300 focus:border-primary outline-none"
                              placeholder="Title,Artist,Duration (Seconds),Video URL...&#10;My Song,The Band,240,https://..."
                          />
+
+                          {importSaveStatus !== 'idle' && (
+                              <div className={`p-3 rounded-lg border text-xs flex items-center gap-2 ${importSaveStatus === 'saving' ? 'bg-zinc-800/50 border-zinc-700 text-zinc-300 animate-pulse' : importSaveStatus === 'saved' ? 'bg-emerald-950/30 border-emerald-800 text-emerald-400' : 'bg-red-950/30 border-red-800 text-red-400'}`}>
+                                  {importSaveStatus === 'saving' && (
+                                      <>
+                                          <Icons.Refresh size={14} className="animate-spin text-zinc-400"/>
+                                          <span>Saving imported songs...</span>
+                                      </>
+                                  )}
+                                  {importSaveStatus === 'saved' && (
+                                      <>
+                                          <Icons.Check size={14} className="text-emerald-400"/>
+                                          <span>Imported songs saved to Neon.</span>
+                                      </>
+                                  )}
+                                  {importSaveStatus === 'failed' && (
+                                      <>
+                                          <Icons.Warning size={14} className="text-red-400"/>
+                                          <span>Save failed: {importSaveError}</span>
+                                      </>
+                                  )}
+                              </div>
+                          )}
                      </div>
 
                      <div className="p-4 border-t border-white/5 flex justify-end gap-2 bg-zinc-900 shrink-0">
