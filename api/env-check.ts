@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { randomUUID } from 'node:crypto';
-import { hasDatabaseUrl } from './_lib/db';
+import { hasDatabaseUrl } from './_lib/db.js';
 
 export default function handler(
   req: VercelRequest,

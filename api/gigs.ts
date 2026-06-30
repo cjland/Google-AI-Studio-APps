@@ -1,9 +1,11 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { Pool } from '@neondatabase/serverless';
 import { v4 as uuidv4 } from 'uuid';
-import { getCurrentBand } from './_lib/currentBand';
-import { mapGig, mapGigSet } from './_lib/mappers';
-import { getSql } from './_lib/db';
+
+
+import { getCurrentBand } from './_lib/currentBand.js';
+import { mapGig, mapGigSet } from './_lib/mappers.js';
+import { getSql } from './_lib/db.js';
 
 let pool: Pool | null = null;
 

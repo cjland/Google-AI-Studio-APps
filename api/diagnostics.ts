@@ -1,6 +1,9 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { randomUUID } from 'node:crypto';
-import { getSql, hasDatabaseUrl } from './_lib/db';
+import {
+  getSql,
+  hasDatabaseUrl
+} from './_lib/db.js';
 
 function valueAsText(value: unknown): string | null {
   if (value === null || value === undefined || value === '') {

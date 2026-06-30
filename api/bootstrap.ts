@@ -87,34 +87,34 @@ export default async function handler(
 
   results.push(
     await testImport(
-      './_lib/db',
-      () => import('./_lib/db')
+      './_lib/db.js',
+      () => import('./_lib/db.js')
     )
   );
 
   results.push(
     await testImport(
-      './_lib/currentBand',
-      () => import('./_lib/currentBand')
+      './_lib/currentBand.js',
+      () => import('./_lib/currentBand.js')
     )
   );
 
   results.push(
     await testImport(
-      './_lib/mappers',
-      () => import('./_lib/mappers')
+      './_lib/mappers.js',
+      () => import('./_lib/mappers.js')
     )
   );
 
   const dbResult = results.find(
-    result => result.module === './_lib/db'
+    result => result.module === './_lib/db.js'
   );
 
   let databaseClientTest: any = null;
 
   if (dbResult?.ok) {
     try {
-      const dbModule = await import('./_lib/db');
+      const dbModule = await import('./_lib/db.js');
 
       databaseClientTest = {
         ok: true,
@@ -135,7 +135,7 @@ export default async function handler(
   }
 
   const mapperResult = results.find(
-    result => result.module === './_lib/mappers'
+    result => result.module === './_lib/mappers.js'
   );
 
   let mapperExportTest: any = null;
@@ -143,7 +143,7 @@ export default async function handler(
   if (mapperResult?.ok) {
     try {
       const mapperModule =
-        await import('./_lib/mappers');
+        await import('./_lib/mappers.js');
 
       mapperExportTest = {
         ok: true,
@@ -168,7 +168,7 @@ export default async function handler(
 
   const currentBandResult = results.find(
     result =>
-      result.module === './_lib/currentBand'
+      result.module === './_lib/currentBand.js'
   );
 
   let currentBandExportTest: any = null;
@@ -176,7 +176,7 @@ export default async function handler(
   if (currentBandResult?.ok) {
     try {
       const currentBandModule =
-        await import('./_lib/currentBand');
+        await import('./_lib/currentBand.js');
 
       currentBandExportTest = {
         ok: true,
@@ -200,7 +200,7 @@ export default async function handler(
       mapperExportTest?.ok !== false &&
       currentBandExportTest?.ok !== false,
 
-    test: 'bootstrap-import-diagnostics-v2',
+    test: 'bootstrap-import-diagnostics-v3',
 
     environment: {
       nodeVersion: process.version,
