@@ -137,7 +137,23 @@ export const parseCSV = (text: string): Song[] => {
 
   for (let i = 1; i < lines.length; i++) {
     const values = parseLine(lines[i]);
-    const song: any = { id: uuidv4() };
+    const song: any = {
+      id: uuidv4(),
+      externalId: null,
+      title: '',
+      artist: '',
+      durationSeconds: 0,
+      videoUrl: null,
+      tags: [],
+      rating: null,
+      playedLive: false,
+      guitarLessonUrl: null,
+      bassLessonUrl: null,
+      lyricsUrl: null,
+      generalNotes: null,
+      practiceStatus: 'Ready',
+      active: true
+    };
     
     headers.forEach((header, index) => {
       const val = values[index] || '';
@@ -148,7 +164,22 @@ export const parseCSV = (text: string): Song[] => {
       
       // Metrics
       else if (header.includes('duration') || header.includes('time') || header.includes('length')) song.durationSeconds = parseDurationToSeconds(val);
-      else if (header.includes('rating')) song.rating = parseInt(val) || 0;
+      else if (header.includes('rating')) {
+        const parsedRating = Number.parseInt(val, 10);
+
+        song.rating =
+          Number.isFinite(parsedRating) &&
+          parsedRating >= 1 &&
+          parsedRating <= 5
+            ? parsedRating
+            : null;
+      }
+      else if (header.includes('tag')) {
+        song.tags = val
+          .split(',')
+          .map((tag: string) => tag.trim())
+          .filter(Boolean);
+      }
       else if (header.includes('live')) song.playedLive = val.toLowerCase().includes('yes') || val.toLowerCase() === 'true';
       
       // Status & Notes
@@ -163,12 +194,37 @@ export const parseCSV = (text: string): Song[] => {
       else if (header.includes('video') || header.includes('link') || header === 'url') song.videoUrl = val;
     });
 
-    // Validations
-    if (song.title) {
-       if (!song.artist) song.artist = 'Unknown Artist';
-       if (typeof song.durationSeconds !== 'number') song.durationSeconds = 0;
-       if (!song.practiceStatus) song.practiceStatus = 'Ready';
-       songs.push(song as Song);
+    if (song.title?.trim()) {
+      song.title = song.title.trim();
+      song.artist =
+        song.artist?.trim() || 'Unknown Artist';
+
+      song.durationSeconds =
+        Number.isFinite(Number(song.durationSeconds))
+          ? Math.max(0, Number(song.durationSeconds))
+          : 0;
+
+      song.tags = Array.isArray(song.tags)
+        ? song.tags
+        : [];
+
+      song.rating =
+        song.rating === null ||
+        song.rating === undefined
+          ? null
+          : Number(song.rating);
+
+      song.playedLive =
+        Boolean(song.playedLive);
+
+      song.practiceStatus =
+        song.practiceStatus === 'Practice'
+          ? 'Practice'
+          : 'Ready';
+
+      song.active = true;
+
+      songs.push(song as Song);
     }
   }
 

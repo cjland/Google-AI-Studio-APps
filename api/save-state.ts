@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 import { getCurrentBand } from './_lib/currentBand.js';
 import {
+  mapBand,
   mapSong,
   mapGig,
   mapGigSet,
@@ -80,16 +81,45 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     await client.query('BEGIN');
 
     // 2. Update Band
-    await client.query(
-      `UPDATE bands 
-       SET name = $1, updated_at = NOW() 
-       WHERE id = $2
-       RETURNING id, name, created_at, updated_at`,
+    const bandResult = await client.query(
+      `UPDATE public.bands
+       SET
+         name = $1,
+         logo_url = $2,
+         members = $3,
+         default_library_url = $4,
+         band_profile_url = $5,
+         gig_details_url = $6,
+         updated_at = NOW()
+       WHERE id = $7
+       RETURNING
+         id,
+         name,
+         logo_url,
+         members,
+         default_library_url,
+         band_profile_url,
+         gig_details_url,
+         created_at,
+         updated_at`,
       [
         bandSettings.name,
+        bandSettings.logoUrl || null,
+        Array.isArray(bandSettings.members)
+          ? bandSettings.members
+              .map((member: string) =>
+                member.trim()
+              )
+              .filter(Boolean)
+          : [],
+        bandSettings.defaultLibraryUrl || null,
+        bandSettings.bandProfileUrl || null,
+        bandSettings.gigDetailsUrl || null,
         band.id
       ]
     );
+
+    const savedBand = mapBand(bandResult.rows[0]);
 
     // 3. Upsert Songs
     const dbSongs: any[] = [];
@@ -358,12 +388,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    // Resolve final updated band info
-    const updatedBand = await getCurrentBand();
-
     return res.status(200).json({
       ok: true,
-      band: updatedBand,
+      band: savedBand,
       songs: dbSongs,
       gig: dbGig,
       sets: dbSets,

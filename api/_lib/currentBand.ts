@@ -8,6 +8,11 @@ export async function getCurrentBand() {
     SELECT
       id,
       name,
+      logo_url,
+      members,
+      default_library_url,
+      band_profile_url,
+      gig_details_url,
       created_at,
       updated_at
     FROM public.bands

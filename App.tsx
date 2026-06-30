@@ -868,7 +868,24 @@ export default function App() {
       }
 
       setSetupRequired(false);
-      if (data.band) setBandSettings(data.band);
+      if (data.band) {
+        setBandSettings({
+          name:
+            data.band.name || 'My Band',
+          logoUrl:
+            data.band.logoUrl || '',
+          members:
+            Array.isArray(data.band.members)
+              ? data.band.members
+              : [],
+          defaultLibraryUrl:
+            data.band.defaultLibraryUrl || '',
+          bandProfileUrl:
+            data.band.bandProfileUrl || '',
+          gigDetailsUrl:
+            data.band.gigDetailsUrl || ''
+        });
+      }
       if (data.songs) setSongs(data.songs);
       if (data.gigs) setGigs(data.gigs);
       if (data.usage) setUsage(data.usage);
@@ -1022,7 +1039,24 @@ export default function App() {
     try {
       const response = await saveState(payload);
       if (response.ok) {
-        if (response.band) setBandSettings(response.band);
+        if (response.band) {
+          setBandSettings({
+            name:
+              response.band.name || 'My Band',
+            logoUrl:
+              response.band.logoUrl || '',
+            members:
+              Array.isArray(response.band.members)
+                ? response.band.members
+                : [],
+            defaultLibraryUrl:
+              response.band.defaultLibraryUrl || '',
+            bandProfileUrl:
+              response.band.bandProfileUrl || '',
+            gigDetailsUrl:
+              response.band.gigDetailsUrl || ''
+          });
+        }
         if (response.songs) setSongs(response.songs);
         if (response.gig) {
           setGigDetails({
@@ -1301,59 +1335,110 @@ export default function App() {
   };
 
   const handleImportSongsMatch = (incoming: Song[], mode: 'add' | 'replace') => {
-    const norm = (s: string) => (s || '').trim().toLowerCase();
-    let updatedSongs: Song[] = [];
+    try {
+      const norm = (s: string) => (s || '').trim().toLowerCase();
+      let updatedSongs: Song[] = [];
 
-    if (mode === 'replace') {
-      updatedSongs = [...songs];
-    } else {
-      updatedSongs = [...songs];
-    }
-
-    incoming.forEach(incomingSong => {
-      let matchIdx = -1;
-
-      if (isValidUUID(incomingSong.id)) {
-        matchIdx = updatedSongs.findIndex(s => s.id === incomingSong.id);
-      }
-
-      if (matchIdx === -1 && incomingSong.externalId) {
-        matchIdx = updatedSongs.findIndex(s => s.externalId === incomingSong.externalId);
-      }
-
-      if (matchIdx === -1) {
-        matchIdx = updatedSongs.findIndex(s => norm(s.title) === norm(incomingSong.title) && norm(s.artist) === norm(incomingSong.artist));
-      }
-
-      if (matchIdx !== -1) {
-        updatedSongs[matchIdx] = {
-          ...updatedSongs[matchIdx],
-          title: incomingSong.title,
-          artist: incomingSong.artist,
-          durationSeconds: incomingSong.durationSeconds,
-          videoUrl: incomingSong.videoUrl || updatedSongs[matchIdx].videoUrl,
-          tags: incomingSong.tags.length > 0 ? incomingSong.tags : updatedSongs[matchIdx].tags,
-          rating: incomingSong.rating || updatedSongs[matchIdx].rating,
-          playedLive: incomingSong.playedLive !== undefined ? incomingSong.playedLive : updatedSongs[matchIdx].playedLive,
-          guitarLessonUrl: incomingSong.guitarLessonUrl || updatedSongs[matchIdx].guitarLessonUrl,
-          bassLessonUrl: incomingSong.bassLessonUrl || updatedSongs[matchIdx].bassLessonUrl,
-          lyricsUrl: incomingSong.lyricsUrl || updatedSongs[matchIdx].lyricsUrl,
-          generalNotes: incomingSong.generalNotes || updatedSongs[matchIdx].generalNotes,
-          practiceStatus: incomingSong.practiceStatus || updatedSongs[matchIdx].practiceStatus,
-          externalId: incomingSong.externalId || updatedSongs[matchIdx].externalId || null
-        };
+      if (mode === 'replace') {
+        updatedSongs = [...songs];
       } else {
-        const finalId = isValidUUID(incomingSong.id) ? incomingSong.id : `temp-song-${uuidv4()}`;
-        updatedSongs.push({
-          ...incomingSong,
-          id: finalId,
-          active: true
-        });
+        updatedSongs = [...songs];
       }
-    });
 
-    setSongs(updatedSongs);
-    markDirty();
+      incoming.forEach(incomingSong => {
+        let matchIdx = -1;
+
+        if (isValidUUID(incomingSong.id)) {
+          matchIdx = updatedSongs.findIndex(s => s.id === incomingSong.id);
+        }
+
+        if (matchIdx === -1 && incomingSong.externalId) {
+          matchIdx = updatedSongs.findIndex(s => s.externalId === incomingSong.externalId);
+        }
+
+        if (matchIdx === -1) {
+          matchIdx = updatedSongs.findIndex(s => norm(s.title) === norm(incomingSong.title) && norm(s.artist) === norm(incomingSong.artist));
+        }
+
+        if (matchIdx !== -1) {
+          updatedSongs[matchIdx] = {
+            ...updatedSongs[matchIdx],
+            title: incomingSong.title,
+            artist: incomingSong.artist,
+            durationSeconds: incomingSong.durationSeconds,
+            videoUrl: incomingSong.videoUrl || updatedSongs[matchIdx].videoUrl,
+            tags:
+              Array.isArray(incomingSong.tags) &&
+              incomingSong.tags.length > 0
+                ? incomingSong.tags
+                : (
+                    Array.isArray(updatedSongs[matchIdx].tags)
+                      ? updatedSongs[matchIdx].tags
+                      : []
+                  ),
+            rating:
+              incomingSong.rating !== null &&
+              incomingSong.rating !== undefined
+                ? incomingSong.rating
+                : updatedSongs[matchIdx].rating,
+            playedLive: incomingSong.playedLive !== undefined ? incomingSong.playedLive : updatedSongs[matchIdx].playedLive,
+            guitarLessonUrl: incomingSong.guitarLessonUrl || updatedSongs[matchIdx].guitarLessonUrl,
+            bassLessonUrl: incomingSong.bassLessonUrl || updatedSongs[matchIdx].bassLessonUrl,
+            lyricsUrl: incomingSong.lyricsUrl || updatedSongs[matchIdx].lyricsUrl,
+            generalNotes: incomingSong.generalNotes || updatedSongs[matchIdx].generalNotes,
+            practiceStatus: incomingSong.practiceStatus || updatedSongs[matchIdx].practiceStatus,
+            externalId: incomingSong.externalId || updatedSongs[matchIdx].externalId || null
+          };
+        } else {
+          const finalId = isValidUUID(incomingSong.id) ? incomingSong.id : `temp-song-${uuidv4()}`;
+          updatedSongs.push({
+            ...incomingSong,
+            id: finalId,
+            title: incomingSong.title?.trim() || 'Untitled Song',
+            artist:
+              incomingSong.artist?.trim() ||
+              'Unknown Artist',
+            durationSeconds:
+              Number.isFinite(
+                Number(incomingSong.durationSeconds)
+              )
+                ? Math.max(
+                    0,
+                    Number(incomingSong.durationSeconds)
+                  )
+                : 0,
+            tags: Array.isArray(incomingSong.tags)
+              ? incomingSong.tags
+              : [],
+            rating:
+              incomingSong.rating === undefined
+                ? null
+                : incomingSong.rating,
+            playedLive:
+              Boolean(incomingSong.playedLive),
+            practiceStatus:
+              incomingSong.practiceStatus === 'Practice'
+                ? 'Practice'
+                : 'Ready',
+            active: true
+          });
+        }
+      });
+
+      setSongs(updatedSongs);
+      markDirty();
+    } catch (error) {
+      console.error(
+        'Song import matching failed',
+        error
+      );
+
+      alert(
+        error instanceof Error
+          ? `Song import failed: ${error.message}`
+          : 'Song import failed because of an unexpected error.'
+      );
+    }
   };
 
   const handleImport = (mode: 'add' | 'replace') => {

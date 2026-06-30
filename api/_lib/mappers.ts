@@ -1,13 +1,21 @@
 export function mapBand(row: any) {
-  if (!row) return null;
+  if (!row) {
+    return null;
+  }
+
   return {
     id: row.id,
-    name: row.name,
-    members: [],
-    logoUrl: null,
-    defaultLibraryUrl: null,
-    bandProfileUrl: null,
-    gigDetailsUrl: null,
+    name: row.name || 'My Band',
+    logoUrl: row.logo_url || '',
+    members: Array.isArray(row.members)
+      ? row.members
+      : [],
+    defaultLibraryUrl:
+      row.default_library_url || '',
+    bandProfileUrl:
+      row.band_profile_url || '',
+    gigDetailsUrl:
+      row.gig_details_url || '',
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
