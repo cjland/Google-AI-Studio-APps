@@ -3,6 +3,63 @@ import type {
   VercelResponse
 } from '@vercel/node';
 
+function serializeError(error: unknown) {
+  const err = error as any;
+
+  return {
+    name:
+      typeof err?.name === 'string'
+        ? err.name
+        : null,
+
+    message:
+      typeof err?.message === 'string'
+        ? err.message
+        : String(error ?? 'Unknown error'),
+
+    code:
+      typeof err?.code === 'string'
+        ? err.code
+        : null,
+
+    stack:
+      typeof err?.stack === 'string'
+        ? err.stack
+        : null,
+
+    cause: (() => {
+      try {
+        return err?.cause
+          ? JSON.stringify(err.cause)
+          : null;
+      } catch {
+        return String(err?.cause ?? '');
+      }
+    })()
+  };
+}
+
+async function testImport(
+  moduleName: string,
+  importFunction: () => Promise<any>
+) {
+  try {
+    const importedModule = await importFunction();
+
+    return {
+      module: moduleName,
+      ok: true,
+      exports: Object.keys(importedModule)
+    };
+  } catch (error) {
+    return {
+      module: moduleName,
+      ok: false,
+      error: serializeError(error)
+    };
+  }
+}
+
 export default async function handler(
   req: VercelRequest,
   res: VercelResponse
@@ -12,16 +69,150 @@ export default async function handler(
     'no-store, no-cache, must-revalidate, max-age=0'
   );
 
+  const results = [];
+
+  results.push(
+    await testImport(
+      'node:crypto',
+      () => import('node:crypto')
+    )
+  );
+
+  results.push(
+    await testImport(
+      '@neondatabase/serverless',
+      () => import('@neondatabase/serverless')
+    )
+  );
+
+  results.push(
+    await testImport(
+      './_lib/db',
+      () => import('./_lib/db')
+    )
+  );
+
+  results.push(
+    await testImport(
+      './_lib/currentBand',
+      () => import('./_lib/currentBand')
+    )
+  );
+
+  results.push(
+    await testImport(
+      './_lib/mappers',
+      () => import('./_lib/mappers')
+    )
+  );
+
+  const dbResult = results.find(
+    result => result.module === './_lib/db'
+  );
+
+  let databaseClientTest: any = null;
+
+  if (dbResult?.ok) {
+    try {
+      const dbModule = await import('./_lib/db');
+
+      databaseClientTest = {
+        ok: true,
+        hasGetSql:
+          typeof dbModule.getSql === 'function',
+        hasHasDatabaseUrl:
+          typeof dbModule.hasDatabaseUrl === 'function',
+        hasEnsureSchema:
+          typeof dbModule.ensureSchema === 'function',
+        exports: Object.keys(dbModule)
+      };
+    } catch (error) {
+      databaseClientTest = {
+        ok: false,
+        error: serializeError(error)
+      };
+    }
+  }
+
+  const mapperResult = results.find(
+    result => result.module === './_lib/mappers'
+  );
+
+  let mapperExportTest: any = null;
+
+  if (mapperResult?.ok) {
+    try {
+      const mapperModule =
+        await import('./_lib/mappers');
+
+      mapperExportTest = {
+        ok: true,
+        mapSong:
+          typeof mapperModule.mapSong === 'function',
+        mapGig:
+          typeof mapperModule.mapGig === 'function',
+        mapGigSet:
+          typeof mapperModule.mapGigSet === 'function',
+        mapSetSongPlacement:
+          typeof mapperModule.mapSetSongPlacement ===
+          'function',
+        exports: Object.keys(mapperModule)
+      };
+    } catch (error) {
+      mapperExportTest = {
+        ok: false,
+        error: serializeError(error)
+      };
+    }
+  }
+
+  const currentBandResult = results.find(
+    result =>
+      result.module === './_lib/currentBand'
+  );
+
+  let currentBandExportTest: any = null;
+
+  if (currentBandResult?.ok) {
+    try {
+      const currentBandModule =
+        await import('./_lib/currentBand');
+
+      currentBandExportTest = {
+        ok: true,
+        hasGetCurrentBand:
+          typeof currentBandModule.getCurrentBand ===
+          'function',
+        exports: Object.keys(currentBandModule)
+      };
+    } catch (error) {
+      currentBandExportTest = {
+        ok: false,
+        error: serializeError(error)
+      };
+    }
+  }
+
   return res.status(200).json({
-    ok: true,
-    test: 'minimal-bootstrap',
-    message: 'The bootstrap function loaded successfully.',
-    method: req.method,
-    nodeVersion: process.version,
-    vercelEnvironment:
-      process.env.VERCEL_ENV ?? null,
-    databaseUrlPresent:
-      Boolean(process.env.DATABASE_URL),
-    timestamp: new Date().toISOString()
+    ok:
+      results.every(result => result.ok) &&
+      databaseClientTest?.ok !== false &&
+      mapperExportTest?.ok !== false &&
+      currentBandExportTest?.ok !== false,
+
+    test: 'bootstrap-import-diagnostics-v2',
+
+    environment: {
+      nodeVersion: process.version,
+      vercelEnvironment:
+        process.env.VERCEL_ENV ?? null,
+      databaseUrlPresent:
+        Boolean(process.env.DATABASE_URL)
+    },
+
+    results,
+    databaseClientTest,
+    mapperExportTest,
+    currentBandExportTest
   });
 }
