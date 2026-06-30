@@ -288,7 +288,8 @@ const BandSettingsModal = ({
     onSave,
     onApplyProfile,
     onApplyGigDetails,
-    databaseHealth
+    databaseHealth,
+    onLoadLibrary
 }: { 
     isOpen: boolean, 
     onClose: () => void, 
@@ -296,12 +297,14 @@ const BandSettingsModal = ({
     onSave: (s: BandSettings) => void,
     onApplyProfile: (s: Partial<BandSettings>) => void,
     onApplyGigDetails: (s: Partial<GigDetails>) => void,
-    databaseHealth?: any
+    databaseHealth?: any,
+    onLoadLibrary: (url: string) => Promise<void>
 }) => {
     const [data, setData] = useState<BandSettings>(settings);
     const [memberSlots, setMemberSlots] = useState<string[]>(Array(5).fill(''));
     const [status, setStatus] = useState<{msg: string, isError: boolean} | null>(null);
     const [gigStatus, setGigStatus] = useState<{msg: string, isError: boolean} | null>(null);
+    const [libraryStatus, setLibraryStatus] = useState<{msg: string, isError: boolean} | null>(null);
     
     const safeDatabaseHealth = databaseHealth ?? {
         health: null,
@@ -321,6 +324,7 @@ const BandSettingsModal = ({
             setMemberSlots(currentMembers.slice(0, 5));
             setStatus(null);
             setGigStatus(null);
+            setLibraryStatus(null);
         }
     }, [isOpen, settings]);
 
@@ -403,6 +407,42 @@ const BandSettingsModal = ({
         }
     };
 
+    const handleFetchLibrary = async () => {
+        const sourceUrl = data.defaultLibraryUrl?.trim();
+
+        if (!sourceUrl) {
+            setLibraryStatus({
+                msg: 'Enter a Default Library URL first.',
+                isError: true
+            });
+            return;
+        }
+
+        setLibraryStatus({
+            msg: 'Loading song library...',
+            isError: false
+        });
+
+        try {
+            await onLoadLibrary(sourceUrl);
+
+            setLibraryStatus({
+                msg: 'Song library loaded into the Import dialog.',
+                isError: false
+            });
+        } catch (error) {
+            console.error('Failed to load default library', error);
+
+            setLibraryStatus({
+                msg:
+                    error instanceof Error
+                        ? error.message
+                        : 'Failed to load song library.',
+                isError: true
+            });
+        }
+    };
+
     if (!isOpen) return null;
 
     return (
@@ -481,7 +521,7 @@ const BandSettingsModal = ({
                                             className="w-full bg-background border border-zinc-700 rounded p-2 text-sm text-white focus:border-primary outline-none"
                                             value={member || ''}
                                             onChange={(e) => handleUpdateMemberSlot(idx, e.target.value)}
-                                            placeholder={`Member {idx + 1}`}
+                                            placeholder={`Member ${idx + 1}`}
                                         />
                                     </div>
                                 ))}
@@ -492,15 +532,49 @@ const BandSettingsModal = ({
                     <div className="h-px bg-white/5 my-4"></div>
 
                     <div>
-                        <label className="block text-xs text-zinc-500 mb-1">Default Library URL (CSV/Google Sheet)</label>
-                        <input 
-                            type="text" 
-                            className="w-full bg-background border border-zinc-700 rounded p-2 text-sm text-white focus:border-primary outline-none"
-                            value={data.defaultLibraryUrl || ''}
-                            onChange={e => setData({...data, defaultLibraryUrl: e.target.value})}
-                            placeholder="https://docs.google.com/spreadsheets/..."
-                        />
-                         <p className="text-[10px] text-zinc-600 mt-1">Used for quickly importing a base library in the Import dialog.</p>
+                        <label className="block text-xs text-zinc-500 mb-1">
+                            Default Library URL (CSV/Google Sheet)
+                        </label>
+
+                        <div className="flex gap-2">
+                            <input
+                                type="text"
+                                className="flex-1 bg-background border border-zinc-700 rounded p-2 text-sm text-white focus:border-primary outline-none"
+                                value={data.defaultLibraryUrl || ''}
+                                onChange={e =>
+                                    setData({
+                                        ...data,
+                                        defaultLibraryUrl: e.target.value
+                                    })
+                                }
+                                placeholder="https://docs.google.com/spreadsheets/..."
+                            />
+
+                            <button
+                                type="button"
+                                onClick={handleFetchLibrary}
+                                className="px-3 py-1 bg-zinc-800 text-xs text-white rounded hover:bg-zinc-700 border border-white/5 whitespace-nowrap"
+                                disabled={!data.defaultLibraryUrl}
+                            >
+                                Load Library
+                            </button>
+                        </div>
+
+                        {libraryStatus ? (
+                            <p
+                                className={`text-[10px] mt-1 font-medium ${
+                                    libraryStatus.isError
+                                        ? 'text-red-400'
+                                        : 'text-green-400'
+                                }`}
+                            >
+                                {libraryStatus.msg}
+                            </p>
+                        ) : (
+                            <p className="text-[10px] text-zinc-600 mt-1">
+                                Loads the spreadsheet into the Import Song Library dialog for review.
+                            </p>
+                        )}
                     </div>
 
                     <div>
@@ -1175,6 +1249,55 @@ export default function App() {
             console.error("Failed to fetch library", error);
             alert("Failed to load library from URL. Ensure the Google Sheet is Public.");
         }
+  };
+
+  const loadLibraryIntoImport = async (
+    sourceUrl: string
+  ) => {
+    const url = transformGoogleSheetUrl(sourceUrl);
+
+    const res = await fetch(url);
+
+    if (!res.ok) {
+      throw new Error(
+        `Spreadsheet request failed with HTTP ${res.status}.`
+      );
+    }
+
+    const text = await res.text();
+
+    const trimmed = text.trim().toLowerCase();
+
+    if (
+      trimmed.startsWith('<!doctype html') ||
+      trimmed.startsWith('<html')
+    ) {
+      throw new Error(
+        'Google returned an HTML page. Confirm the sheet is shared as Anyone with the link → Viewer.'
+      );
+    }
+
+    const firstLine =
+      text.split(/\r?\n/)[0] || '';
+
+    const normalizedHeaders =
+      firstLine.toLowerCase();
+
+    const hasTitle =
+      normalizedHeaders.includes('title');
+
+    const hasArtist =
+      normalizedHeaders.includes('artist');
+
+    if (!hasTitle || !hasArtist) {
+      throw new Error(
+        `Song Library headers were not found. Received first row: ${firstLine}`
+      );
+    }
+
+    setImportText(text);
+    setShowBandSettings(false);
+    setShowImport(true);
   };
 
   const handleImportSongsMatch = (incoming: Song[], mode: 'add' | 'replace') => {
@@ -2209,6 +2332,7 @@ Deployment ID: ${deploymentId}`;
              onClose={() => setShowBandSettings(false)}
              settings={bandSettings}
              databaseHealth={databaseHealth}
+             onLoadLibrary={loadLibraryIntoImport}
              onSave={(s) => {
                  setBandSettings(s);
                  markDirty();
