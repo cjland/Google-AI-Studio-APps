@@ -726,7 +726,7 @@ const ConfirmationModal = ({ isOpen, state, onClose, onConfirm }: { isOpen: bool
                         </button>
 
                         <button
-                            onClick={() => { onConfirm(); onClose(); }}
+                            onClick={onConfirm}
                             className={`px-4 py-2 rounded-md text-sm font-medium text-white transition-colors ${state.confirmVariant === 'danger' ? 'bg-red-600 hover:bg-red-500' : 'bg-primary hover:bg-indigo-500'}`}
                         >
                             {state.confirmLabel}
@@ -843,6 +843,86 @@ export default function App() {
   
   const [editingSong, setEditingSong] = useState<Song | null>(null);
   const [confirmState, setConfirmState] = useState<ConfirmationState | null>(null);
+
+  const [clientRuntimeError, setClientRuntimeError] =
+    useState<{
+      message: string;
+      stack?: string;
+      source?: string;
+    } | null>(null);
+
+  useEffect(() => {
+    const handleWindowError = (
+      event: ErrorEvent
+    ) => {
+      console.error(
+        'WINDOW_RUNTIME_ERROR',
+        event.error || event.message
+      );
+
+      setClientRuntimeError({
+        message:
+          event.error?.message ||
+          event.message ||
+          'Unknown browser error',
+        stack:
+          event.error?.stack || undefined,
+        source:
+          event.filename
+            ? `${event.filename}:${event.lineno}:${event.colno}`
+            : undefined
+      });
+    };
+
+    const handleUnhandledRejection = (
+      event: PromiseRejectionEvent
+    ) => {
+      const reason = event.reason;
+
+      console.error(
+        'UNHANDLED_PROMISE_REJECTION',
+        reason
+      );
+
+      setClientRuntimeError({
+        message:
+          reason instanceof Error
+            ? reason.message
+            : String(
+                reason ||
+                'Unhandled promise rejection'
+              ),
+        stack:
+          reason instanceof Error
+            ? reason.stack
+            : undefined,
+        source:
+          'Unhandled Promise Rejection'
+      });
+    };
+
+    window.addEventListener(
+      'error',
+      handleWindowError
+    );
+
+    window.addEventListener(
+      'unhandledrejection',
+      handleUnhandledRejection
+    );
+
+    return () => {
+      window.removeEventListener(
+        'error',
+        handleWindowError
+      );
+
+      window.removeEventListener(
+        'unhandledrejection',
+        handleUnhandledRejection
+      );
+    };
+  }, []);
 
   // Mark state dirty
   const markDirty = () => {
@@ -1174,7 +1254,7 @@ export default function App() {
   const timeOptions = useMemo(() => generateTimeOptions(), []);
 
   const handleGeneratePDF = (options: PDFOptions) => {
-      generatePDFDoc(sets, gigDetails, bandSettings, options);
+      generatePDFDoc(sets, gigDetails, options, bandSettings);
       setShowPDFOptions(false);
   };
 
@@ -1334,112 +1414,309 @@ export default function App() {
     setShowImport(true);
   };
 
-  const handleImportSongsMatch = (incoming: Song[], mode: 'add' | 'replace') => {
-    try {
-      const norm = (s: string) => (s || '').trim().toLowerCase();
-      let updatedSongs: Song[] = [];
 
-      if (mode === 'replace') {
-        updatedSongs = [...songs];
-      } else {
-        updatedSongs = [...songs];
+
+const handleImportSongsMatch = (
+  incoming: Song[],
+  mode: 'add' | 'replace'
+): boolean => {
+  try {
+    console.log(
+      'IMPORT_MATCH_STARTED',
+      {
+        mode,
+        incomingCount:
+          Array.isArray(incoming)
+            ? incoming.length
+            : null,
+        currentSongCount:
+          Array.isArray(songs)
+            ? songs.length
+            : null,
+        firstIncomingSong:
+          Array.isArray(incoming) &&
+          incoming.length > 0
+            ? incoming[0]
+            : null
+      }
+    );
+
+    const normalize = (
+      value: unknown
+    ): string =>
+      String(value ?? '')
+        .trim()
+        .toLowerCase();
+
+    const updatedSongs: Song[] =
+      Array.isArray(songs)
+        ? songs.map(song => ({
+            ...song,
+            tags: Array.isArray(song.tags)
+              ? song.tags
+              : []
+          }))
+        : [];
+
+    const safeIncoming =
+      Array.isArray(incoming)
+        ? incoming
+        : [];
+
+    safeIncoming.forEach(rawSong => {
+      const incomingSong: Song = {
+        ...rawSong,
+
+        id:
+          rawSong.id ||
+          `temp-song-${uuidv4()}`,
+
+        title:
+          rawSong.title?.trim() ||
+          'Untitled Song',
+
+        artist:
+          rawSong.artist?.trim() ||
+          'Unknown Artist',
+
+        durationSeconds:
+          Number.isFinite(
+            Number(rawSong.durationSeconds)
+          )
+            ? Math.max(
+                0,
+                Number(
+                  rawSong.durationSeconds
+                )
+              )
+            : 0,
+
+        tags: Array.isArray(
+          rawSong.tags
+        )
+          ? rawSong.tags
+          : [],
+
+        rating:
+          rawSong.rating === null ||
+          rawSong.rating === undefined
+            ? null
+            : Number(rawSong.rating),
+
+        playedLive:
+          Boolean(rawSong.playedLive),
+
+        practiceStatus:
+          rawSong.practiceStatus ===
+          'Practice'
+            ? 'Practice'
+            : 'Ready',
+
+        active:
+          rawSong.active !== false
+      };
+
+      let matchIndex = -1;
+
+      if (
+        isValidUUID(incomingSong.id)
+      ) {
+        matchIndex =
+          updatedSongs.findIndex(
+            existing =>
+              existing.id ===
+              incomingSong.id
+          );
       }
 
-      incoming.forEach(incomingSong => {
-        let matchIdx = -1;
+      if (
+        matchIndex === -1 &&
+        incomingSong.externalId
+      ) {
+        matchIndex =
+          updatedSongs.findIndex(
+            existing =>
+              existing.externalId ===
+              incomingSong.externalId
+          );
+      }
 
-        if (isValidUUID(incomingSong.id)) {
-          matchIdx = updatedSongs.findIndex(s => s.id === incomingSong.id);
-        }
+      if (matchIndex === -1) {
+        matchIndex =
+          updatedSongs.findIndex(
+            existing =>
+              normalize(existing.title) ===
+                normalize(
+                  incomingSong.title
+                ) &&
+              normalize(existing.artist) ===
+                normalize(
+                  incomingSong.artist
+                )
+          );
+      }
 
-        if (matchIdx === -1 && incomingSong.externalId) {
-          matchIdx = updatedSongs.findIndex(s => s.externalId === incomingSong.externalId);
-        }
+      if (matchIndex >= 0) {
+        const existing =
+          updatedSongs[matchIndex];
 
-        if (matchIdx === -1) {
-          matchIdx = updatedSongs.findIndex(s => norm(s.title) === norm(incomingSong.title) && norm(s.artist) === norm(incomingSong.artist));
-        }
+        updatedSongs[matchIndex] = {
+          ...existing,
 
-        if (matchIdx !== -1) {
-          updatedSongs[matchIdx] = {
-            ...updatedSongs[matchIdx],
-            title: incomingSong.title,
-            artist: incomingSong.artist,
-            durationSeconds: incomingSong.durationSeconds,
-            videoUrl: incomingSong.videoUrl || updatedSongs[matchIdx].videoUrl,
-            tags:
-              Array.isArray(incomingSong.tags) &&
-              incomingSong.tags.length > 0
-                ? incomingSong.tags
-                : (
-                    Array.isArray(updatedSongs[matchIdx].tags)
-                      ? updatedSongs[matchIdx].tags
-                      : []
-                  ),
-            rating:
-              incomingSong.rating !== null &&
-              incomingSong.rating !== undefined
-                ? incomingSong.rating
-                : updatedSongs[matchIdx].rating,
-            playedLive: incomingSong.playedLive !== undefined ? incomingSong.playedLive : updatedSongs[matchIdx].playedLive,
-            guitarLessonUrl: incomingSong.guitarLessonUrl || updatedSongs[matchIdx].guitarLessonUrl,
-            bassLessonUrl: incomingSong.bassLessonUrl || updatedSongs[matchIdx].bassLessonUrl,
-            lyricsUrl: incomingSong.lyricsUrl || updatedSongs[matchIdx].lyricsUrl,
-            generalNotes: incomingSong.generalNotes || updatedSongs[matchIdx].generalNotes,
-            practiceStatus: incomingSong.practiceStatus || updatedSongs[matchIdx].practiceStatus,
-            externalId: incomingSong.externalId || updatedSongs[matchIdx].externalId || null
-          };
-        } else {
-          const finalId = isValidUUID(incomingSong.id) ? incomingSong.id : `temp-song-${uuidv4()}`;
-          updatedSongs.push({
-            ...incomingSong,
-            id: finalId,
-            title: incomingSong.title?.trim() || 'Untitled Song',
-            artist:
-              incomingSong.artist?.trim() ||
-              'Unknown Artist',
-            durationSeconds:
-              Number.isFinite(
-                Number(incomingSong.durationSeconds)
-              )
-                ? Math.max(
-                    0,
-                    Number(incomingSong.durationSeconds)
-                  )
-                : 0,
-            tags: Array.isArray(incomingSong.tags)
+          title:
+            incomingSong.title,
+
+          artist:
+            incomingSong.artist,
+
+          durationSeconds:
+            incomingSong.durationSeconds,
+
+          videoUrl:
+            incomingSong.videoUrl ||
+            existing.videoUrl ||
+            null,
+
+          tags:
+            incomingSong.tags.length > 0
               ? incomingSong.tags
-              : [],
-            rating:
-              incomingSong.rating === undefined
-                ? null
-                : incomingSong.rating,
-            playedLive:
-              Boolean(incomingSong.playedLive),
-            practiceStatus:
-              incomingSong.practiceStatus === 'Practice'
-                ? 'Practice'
-                : 'Ready',
-            active: true
-          });
-        }
-      });
+              : (
+                  Array.isArray(
+                    existing.tags
+                  )
+                    ? existing.tags
+                    : []
+                ),
 
-      setSongs(updatedSongs);
-      markDirty();
-    } catch (error) {
-      console.error(
-        'Song import matching failed',
-        error
+          rating:
+            incomingSong.rating !== null &&
+            incomingSong.rating !== undefined
+              ? incomingSong.rating
+              : existing.rating ?? null,
+
+          playedLive:
+            incomingSong.playedLive,
+
+          guitarLessonUrl:
+            incomingSong.guitarLessonUrl ||
+            existing.guitarLessonUrl ||
+            null,
+
+          bassLessonUrl:
+            incomingSong.bassLessonUrl ||
+            existing.bassLessonUrl ||
+            null,
+
+          lyricsUrl:
+            incomingSong.lyricsUrl ||
+            existing.lyricsUrl ||
+            null,
+
+          generalNotes:
+            incomingSong.generalNotes ||
+            existing.generalNotes ||
+            null,
+
+          practiceStatus:
+            incomingSong.practiceStatus ||
+            existing.practiceStatus ||
+            'Ready',
+
+          externalId:
+            incomingSong.externalId ||
+            existing.externalId ||
+            null,
+
+          active: true
+        };
+      } else {
+        const finalId =
+          isValidUUID(incomingSong.id)
+            ? incomingSong.id
+            : `temp-song-${uuidv4()}`;
+
+        updatedSongs.push({
+          ...incomingSong,
+          id: finalId,
+          tags: Array.isArray(
+            incomingSong.tags
+          )
+            ? incomingSong.tags
+            : [],
+          active: true
+        });
+      }
+    });
+
+    console.log(
+      'IMPORT_MATCH_RESULT',
+      {
+        updatedSongCount:
+          updatedSongs.length,
+        invalidSongs:
+          updatedSongs.filter(
+            song =>
+              !song ||
+              typeof song.title !==
+                'string' ||
+              typeof song.artist !==
+                'string' ||
+              !Array.isArray(song.tags) ||
+              !Number.isFinite(
+                Number(
+                  song.durationSeconds
+                )
+              )
+          )
+      }
+    );
+
+    const invalidSongs =
+      updatedSongs.filter(
+        song =>
+          !song ||
+          typeof song.title !== 'string' ||
+          typeof song.artist !== 'string' ||
+          !Array.isArray(song.tags) ||
+          !Number.isFinite(
+            Number(song.durationSeconds)
+          )
       );
 
-      alert(
-        error instanceof Error
-          ? `Song import failed: ${error.message}`
-          : 'Song import failed because of an unexpected error.'
+    if (invalidSongs.length > 0) {
+      throw new Error(
+        `Import produced ${invalidSongs.length} invalid song record(s).`
       );
     }
-  };
+
+    setSongs(updatedSongs);
+    markDirty();
+
+    return true;
+  } catch (error) {
+    console.error(
+      'Song import matching failed',
+      error
+    );
+
+    const message =
+      error instanceof Error
+        ? error.message
+        : 'Unexpected song import error';
+
+    alert(
+      `Song import failed: ${message}`
+    );
+
+    return false;
+  }
+};
+
+
+
+
+
+
 
   const handleImport = (mode: 'add' | 'replace') => {
     const newSongs = parseCSV(importText);
@@ -1476,27 +1753,113 @@ export default function App() {
   };
 
   const handleConfirmAction = () => {
-      if (!confirmState) return;
+    if (!confirmState) {
+      return;
+    }
 
-      if (confirmState.type === 'REMOVE_SET') {
-          const id = confirmState.data?.id;
-          setSets(sets.filter(s => s.id !== id));
-          markDirty();
+    const currentConfirmation =
+      confirmState;
+
+    try {
+      console.log(
+        'CONFIRM_ACTION_STARTED',
+        {
+          type:
+            currentConfirmation.type,
+          importedSongCount:
+            Array.isArray(
+              currentConfirmation.data
+                ?.newSongs
+            )
+              ? currentConfirmation.data
+                  .newSongs.length
+              : null
+        }
+      );
+
+      if (
+        currentConfirmation.type ===
+        'REMOVE_SET'
+      ) {
+        const id =
+          currentConfirmation.data?.id;
+
+        setSets(currentSets =>
+          currentSets.filter(
+            set => set.id !== id
+          )
+        );
+
+        markDirty();
+      } else if (
+        currentConfirmation.type ===
+        'REPLACE_LIBRARY'
+      ) {
+        const newSongs =
+          currentConfirmation.data
+            ?.newSongs;
+
+        if (!Array.isArray(newSongs)) {
+          throw new Error(
+            'Imported song data is missing.'
+          );
+        }
+
+        const succeeded =
+          handleImportSongsMatch(
+            newSongs,
+            'replace'
+          );
+
+        if (!succeeded) {
+          throw new Error(
+            'Song matching returned an unsuccessful result.'
+          );
+        }
+
+        setShowImport(false);
+        setImportText('');
+      } else if (
+        currentConfirmation.type ===
+        'CLEAR_LIBRARY'
+      ) {
+        setSongs([]);
+        markDirty();
       }
-      else if (confirmState.type === 'REPLACE_LIBRARY') {
-          const newSongs = confirmState.data?.newSongs;
-          if (newSongs) {
-              handleImportSongsMatch(newSongs, 'replace');
-              setShowImport(false);
-              setImportText('');
-          }
-      }
-      else if (confirmState.type === 'CLEAR_LIBRARY') {
-          setSongs([]);
-          markDirty();
-      }
+
+      console.log(
+        'CONFIRM_ACTION_COMPLETED',
+        {
+          type:
+            currentConfirmation.type
+        }
+      );
 
       setConfirmState(null);
+    } catch (error) {
+      console.error(
+        'CONFIRM_ACTION_FAILED',
+        error
+      );
+
+      const message =
+        error instanceof Error
+          ? error.message
+          : String(error);
+
+      setClientRuntimeError({
+        message:
+          `Confirmation action failed: ${message}`,
+        stack:
+          error instanceof Error
+            ? error.stack
+            : undefined,
+        source:
+          'handleConfirmAction'
+      });
+
+      setConfirmState(null);
+    }
   };
   
   const handleRefreshGigDetails = async () => {
@@ -1618,6 +1981,11 @@ export default function App() {
         }
     }
   };
+
+
+
+
+
 
   const handleDragEnd = (event: DragEndEvent) => {
       const { active, over } = event;
@@ -2669,6 +3037,54 @@ Deployment ID: ${deploymentId}`;
              onClose={() => setConfirmState(null)}
              onConfirm={handleConfirmAction}
          />
+
+         {clientRuntimeError && (
+             <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-6 animate-none">
+               <div className="w-full max-w-3xl rounded-xl border border-red-900 bg-zinc-950 p-6 text-left">
+                 <h2 className="text-xl font-bold text-red-400 mb-3">
+                   Browser runtime error
+                 </h2>
+
+                 <pre className="rounded bg-black border border-zinc-800 p-4 text-sm text-red-300 whitespace-pre-wrap break-words">
+                   {clientRuntimeError.message}
+                 </pre>
+
+                 {clientRuntimeError.source && (
+                   <p className="mt-3 text-xs text-zinc-500">
+                     {clientRuntimeError.source}
+                   </p>
+                 )}
+
+                 {clientRuntimeError.stack && (
+                   <pre className="mt-3 max-h-64 overflow-auto rounded bg-black border border-zinc-800 p-4 text-xs text-zinc-300 whitespace-pre-wrap break-words">
+                     {clientRuntimeError.stack}
+                   </pre>
+                 )}
+
+                 <div className="mt-4 flex gap-3">
+                   <button
+                     type="button"
+                     className="rounded bg-primary px-4 py-2 text-white font-medium"
+                     onClick={() =>
+                       setClientRuntimeError(null)
+                     }
+                   >
+                     Close
+                   </button>
+
+                   <button
+                     type="button"
+                     className="rounded bg-zinc-800 px-4 py-2 text-white font-medium"
+                     onClick={() =>
+                       window.location.reload()
+                     }
+                   >
+                     Reload
+                   </button>
+                 </div>
+               </div>
+             </div>
+         )}
     </div>
   );
 }

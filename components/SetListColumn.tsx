@@ -349,11 +349,11 @@ export const SetListColumn: React.FC<SetListColumnProps> = ({
                 song={song} 
                 setId={setList.id}
                 index={index}
-                isDuplicate={duplicateSongIds.includes(song.id)}
+                isDuplicate={duplicateSongIds.includes(song.songId)}
                 onRemove={() => onRemoveSong(setList.id, song.instanceId)}
                 onUpdateNote={(note) => onUpdateNote(setList.id, song.instanceId, note)}
                 onPlay={() => onPlaySong(song)}
-                onEdit={() => onEditSong(song)}
+                onEdit={() => onEditSong({ ...song, id: song.songId, active: true })}
               />
             ))
           )}

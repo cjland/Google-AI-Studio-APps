@@ -45,6 +45,7 @@ export interface SetList {
   songs: SetSong[];
   color?: string; // For visual distinction
   status?: SetStatus;
+  targetDurationSeconds?: number | null;
 }
 
 export interface DragItem {

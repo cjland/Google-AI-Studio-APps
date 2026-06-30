@@ -97,47 +97,86 @@ export const generateCSV = (songs: Song[]): string => {
   return [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
 };
 
-/**
- * Robust CSV/TSV parser handling all fields including specific lessons and notes
- */
+
+
 export const parseCSV = (text: string): Song[] => {
-  const lines = text.split('\n').filter(l => l.trim());
-  if (lines.length < 2) return [];
+  const normalizedText = String(text || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n');
 
-  // Determine delimiter: check first line for tab to support copy-paste from Excel/Sheets
-  const firstLine = lines[0];
-  const isTab = firstLine.includes('\t');
-  const delimiter = isTab ? '\t' : ',';
+  const lines = normalizedText
+    .split('\n')
+    .filter(line => line.trim());
 
-  // Normalize headers: lowercase, remove quotes
-  const headers = lines[0].split(delimiter).map(h => h.trim().toLowerCase().replace(/^"|"$/g, '').replace(/""/g, '"'));
-  
-  const songs: Song[] = [];
+  if (lines.length < 2) {
+    return [];
+  }
 
-  const parseLine = (line: string) => {
-    if (isTab) {
-       // For tab separated, usually implies simple copy-paste
-       return line.split('\t').map(c => c.trim().replace(/^"|"$/g, '').replace(/""/g, '"'));
+  const isTabDelimited = lines[0].includes('\t');
+  const delimiter = isTabDelimited ? '\t' : ',';
+
+  const parseRow = (row: string): string[] => {
+    if (delimiter === '\t') {
+      return row
+        .split('\t')
+        .map(value => value.trim());
     }
 
-    const result = [];
-    let start = 0;
-    let inQuotes = false;
-    for (let i = 0; i < line.length; i++) {
-      if (line[i] === '"') {
-        inQuotes = !inQuotes;
-      } else if (line[i] === ',' && !inQuotes) {
-        result.push(line.substring(start, i).replace(/^"|"$/g, '').replace(/""/g, '"').trim());
-        start = i + 1;
+    const values: string[] = [];
+    let current = '';
+    let insideQuotes = false;
+
+    for (let index = 0; index < row.length; index++) {
+      const character = row[index];
+
+      if (character === '"') {
+        if (
+          insideQuotes &&
+          row[index + 1] === '"'
+        ) {
+          current += '"';
+          index++;
+        } else {
+          insideQuotes = !insideQuotes;
+        }
+
+        continue;
       }
+
+      if (
+        character === ',' &&
+        !insideQuotes
+      ) {
+        values.push(current.trim());
+        current = '';
+        continue;
+      }
+
+      current += character;
     }
-    result.push(line.substring(start).replace(/^"|"$/g, '').replace(/""/g, '"').trim());
-    return result;
+
+    values.push(current.trim());
+
+    return values;
   };
 
-  for (let i = 1; i < lines.length; i++) {
-    const values = parseLine(lines[i]);
-    const song: any = {
+  const headers = parseRow(lines[0]).map(header =>
+    header
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+  );
+
+  const importedSongs: Song[] = [];
+
+  for (
+    let lineIndex = 1;
+    lineIndex < lines.length;
+    lineIndex++
+  ) {
+    const values = parseRow(lines[lineIndex]);
+
+    const song: Song = {
       id: uuidv4(),
       externalId: null,
       title: '',
@@ -154,82 +193,138 @@ export const parseCSV = (text: string): Song[] => {
       practiceStatus: 'Ready',
       active: true
     };
-    
-    headers.forEach((header, index) => {
-      const val = values[index] || '';
-      
-      // Basic Info
-      if (header.includes('title') || header.includes('song')) song.title = val;
-      else if (header.includes('artist') || header.includes('band')) song.artist = val;
-      
-      // Metrics
-      else if (header.includes('duration') || header.includes('time') || header.includes('length')) song.durationSeconds = parseDurationToSeconds(val);
-      else if (header.includes('rating')) {
-        const parsedRating = Number.parseInt(val, 10);
+
+    headers.forEach((header, columnIndex) => {
+      const value =
+        values[columnIndex]?.trim() || '';
+
+      if (
+        header === 'title' ||
+        header === 'song' ||
+        header === 'song title'
+      ) {
+        song.title = value;
+      } else if (
+        header === 'artist' ||
+        header === 'band'
+      ) {
+        song.artist = value;
+      } else if (
+        header.includes('duration') ||
+        header === 'time' ||
+        header.includes('length')
+      ) {
+        song.durationSeconds =
+          parseDurationToSeconds(value);
+      } else if (
+        header.includes('video') ||
+        header === 'url' ||
+        header === 'link'
+      ) {
+        song.videoUrl = value || null;
+      } else if (
+        header.includes('rating')
+      ) {
+        const rating =
+          Number.parseInt(value, 10);
 
         song.rating =
-          Number.isFinite(parsedRating) &&
-          parsedRating >= 1 &&
-          parsedRating <= 5
-            ? parsedRating
+          Number.isFinite(rating) &&
+          rating >= 1 &&
+          rating <= 5
+            ? rating
             : null;
-      }
-      else if (header.includes('tag')) {
-        song.tags = val
-          .split(',')
-          .map((tag: string) => tag.trim())
-          .filter(Boolean);
-      }
-      else if (header.includes('live')) song.playedLive = val.toLowerCase().includes('yes') || val.toLowerCase() === 'true';
-      
-      // Status & Notes
-      else if (header.includes('status')) song.practiceStatus = val.toLowerCase().includes('practice') ? 'Practice' : 'Ready';
-      else if (header.includes('note')) song.generalNotes = val;
+      } else if (
+        header.includes('played live') ||
+        header === 'live'
+      ) {
+        const normalized =
+          value.toLowerCase();
 
-      // URLs (Specific lessons first to avoid matching generic 'URL')
-      else if (header.includes('guitar')) song.guitarLessonUrl = val;
-      else if (header.includes('bass')) song.bassLessonUrl = val;
-      else if (header.includes('lyrics')) song.lyricsUrl = val;
-      // Generic Video/URL last
-      else if (header.includes('video') || header.includes('link') || header === 'url') song.videoUrl = val;
+        song.playedLive =
+          normalized === 'yes' ||
+          normalized === 'true' ||
+          normalized === '1';
+      } else if (
+        header.includes('guitar')
+      ) {
+        song.guitarLessonUrl =
+          value || null;
+      } else if (
+        header.includes('bass')
+      ) {
+        song.bassLessonUrl =
+          value || null;
+      } else if (
+        header.includes('lyrics')
+      ) {
+        song.lyricsUrl =
+          value || null;
+      } else if (
+        header.includes('status')
+      ) {
+        song.practiceStatus =
+          value.toLowerCase().includes(
+            'practice'
+          )
+            ? 'Practice'
+            : 'Ready';
+      } else if (
+        header.includes('note')
+      ) {
+        song.generalNotes =
+          value || null;
+      } else if (
+        header.includes('tag')
+      ) {
+        song.tags = value
+          .split(/[;,]/)
+          .map(tag => tag.trim())
+          .filter(Boolean);
+      } else if (
+        header.includes('external')
+      ) {
+        song.externalId =
+          value || null;
+      }
     });
 
-    if (song.title?.trim()) {
-      song.title = song.title.trim();
-      song.artist =
-        song.artist?.trim() || 'Unknown Artist';
+    song.title = song.title.trim();
+    song.artist =
+      song.artist.trim() ||
+      'Unknown Artist';
 
-      song.durationSeconds =
-        Number.isFinite(Number(song.durationSeconds))
-          ? Math.max(0, Number(song.durationSeconds))
-          : 0;
+    song.tags = Array.isArray(song.tags)
+      ? song.tags
+      : [];
 
-      song.tags = Array.isArray(song.tags)
-        ? song.tags
-        : [];
+    song.durationSeconds =
+      Number.isFinite(
+        Number(song.durationSeconds)
+      )
+        ? Math.max(
+            0,
+            Number(song.durationSeconds)
+          )
+        : 0;
 
-      song.rating =
-        song.rating === null ||
-        song.rating === undefined
-          ? null
-          : Number(song.rating);
-
-      song.playedLive =
-        Boolean(song.playedLive);
-
-      song.practiceStatus =
-        song.practiceStatus === 'Practice'
-          ? 'Practice'
-          : 'Ready';
-
-      song.active = true;
-
-      songs.push(song as Song);
+    if (song.title) {
+      importedSongs.push(song);
     }
   }
 
-  return songs;
+  return importedSongs;
 };
+
+
+
+
+
+
+
+
+
+
 
 /**
  * Parses Band Profile CSV/TSV
@@ -667,9 +762,9 @@ export const generatePDFDoc = async (
 };
 
 export const MOCK_SONGS: Song[] = [
-  { id: '1', title: 'Bohemian Rhapsody', artist: 'Queen', durationSeconds: 355, videoUrl: 'https://www.youtube.com/watch?v=fJ9rUzIMcZQ', rating: 5, playedLive: true, practiceStatus: 'Ready' },
-  { id: '2', title: 'Hotel California', artist: 'Eagles', durationSeconds: 390, videoUrl: 'https://www.youtube.com/watch?v=EqPtz5qN7HM', rating: 4, playedLive: true, practiceStatus: 'Ready' },
-  { id: '3', title: 'Sweet Child O\' Mine', artist: 'Guns N\' Roses', durationSeconds: 356, videoUrl: 'https://www.youtube.com/watch?v=1w7OgIMMRc4', rating: 5, playedLive: false, practiceStatus: 'Practice' },
-  { id: '4', title: 'Stairway to Heaven', artist: 'Led Zeppelin', durationSeconds: 482, videoUrl: 'https://www.youtube.com/watch?v=xbhCPt6PZIU', rating: 5, playedLive: false, practiceStatus: 'Practice' },
-  { id: '5', title: 'Smells Like Teen Spirit', artist: 'Nirvana', durationSeconds: 301, videoUrl: 'https://www.youtube.com/watch?v=hTWKbfoikeg', rating: 4, playedLive: true, practiceStatus: 'Ready' },
+  { id: '1', title: 'Bohemian Rhapsody', artist: 'Queen', durationSeconds: 355, videoUrl: 'https://www.youtube.com/watch?v=fJ9rUzIMcZQ', rating: 5, playedLive: true, practiceStatus: 'Ready', tags: [], active: true },
+  { id: '2', title: 'Hotel California', artist: 'Eagles', durationSeconds: 390, videoUrl: 'https://www.youtube.com/watch?v=EqPtz5qN7HM', rating: 4, playedLive: true, practiceStatus: 'Ready', tags: [], active: true },
+  { id: '3', title: 'Sweet Child O\' Mine', artist: 'Guns N\' Roses', durationSeconds: 356, videoUrl: 'https://www.youtube.com/watch?v=1w7OgIMMRc4', rating: 5, playedLive: false, practiceStatus: 'Practice', tags: [], active: true },
+  { id: '4', title: 'Stairway to Heaven', artist: 'Led Zeppelin', durationSeconds: 482, videoUrl: 'https://www.youtube.com/watch?v=xbhCPt6PZIU', rating: 5, playedLive: false, practiceStatus: 'Practice', tags: [], active: true },
+  { id: '5', title: 'Smells Like Teen Spirit', artist: 'Nirvana', durationSeconds: 301, videoUrl: 'https://www.youtube.com/watch?v=hTWKbfoikeg', rating: 4, playedLive: true, practiceStatus: 'Ready', tags: [], active: true },
 ];

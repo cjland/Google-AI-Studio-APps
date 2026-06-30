@@ -165,7 +165,22 @@ const DraggableLibrarySong: React.FC<{
   );
 };
 
-export const SongLibrary: React.FC<SongLibraryProps> = ({ songs, sets, usedInSetsMap, onImportClick, onPlaySong, onUpdateSong, onClearLibrary, onEditSong, onAddSongToSet }) => {
+export const SongLibrary: React.FC<SongLibraryProps> = ({
+  songs,
+  sets,
+  usage,
+  onImportClick,
+  onPlaySong,
+  onUpdateSong,
+  onClearLibrary,
+  onEditSong,
+  onAddSongToSet
+}) => {
+  const safeUsage =
+    usage && typeof usage === 'object'
+      ? usage
+      : {};
+
   const [search, setSearch] = useState('');
   const [artistFilter, setArtistFilter] = useState('');
   const [sortBy, setSortBy] = useState<'title-asc' | 'title-desc' | 'artist-asc' | 'artist-desc' | 'duration-asc' | 'duration-desc'>('title-asc');
@@ -212,8 +227,12 @@ export const SongLibrary: React.FC<SongLibraryProps> = ({ songs, sets, usedInSet
 
   // Counters
   const totalSongs = songs.length;
-  // Calculate used based on if it exists in usedInSetsMap
-  const usedSongsCount = songs.filter(s => usedInSetsMap[s.id] && usedInSetsMap[s.id].length > 0).length;
+  // Calculate used based on if it exists in safeUsage
+  const usedSongsCount = songs.filter(
+    s =>
+      Array.isArray(safeUsage[s.id]) &&
+      safeUsage[s.id].length > 0
+  ).length;
 
 
   const filteredSongs = useMemo(() => {
@@ -221,7 +240,9 @@ export const SongLibrary: React.FC<SongLibraryProps> = ({ songs, sets, usedInSet
       const matchesSearch = s.title.toLowerCase().includes(search.toLowerCase());
       const matchesArtist = !artistFilter || s.artist.toLowerCase().includes(artistFilter.toLowerCase());
       
-      const isUsed = usedInSetsMap[s.id] && usedInSetsMap[s.id].length > 0;
+      const isUsed =
+        Array.isArray(safeUsage[s.id]) &&
+        safeUsage[s.id].length > 0;
       if (hideUsed && isUsed) return false;
       
       const isPractice = s.practiceStatus === 'Practice';
@@ -241,7 +262,7 @@ export const SongLibrary: React.FC<SongLibraryProps> = ({ songs, sets, usedInSet
           default: return 0;
       }
     });
-  }, [songs, search, artistFilter, sortBy, hideUsed, hidePractice, usedInSetsMap]);
+  }, [songs, search, artistFilter, sortBy, hideUsed, hidePractice, safeUsage]);
 
   const handleExport = () => {
     const csvContent = generateCSV(songs);
@@ -398,7 +419,11 @@ export const SongLibrary: React.FC<SongLibraryProps> = ({ songs, sets, usedInSet
             <DraggableLibrarySong 
                 key={song.id} 
                 song={song} 
-                usageList={usage[song.id] || []}
+                usageList={
+                  Array.isArray(safeUsage[song.id])
+                    ? safeUsage[song.id]
+                    : []
+                }
                 viewOptions={viewOptions}
                 onPlay={() => onPlaySong(song)}
                 onEdit={() => onEditSong(song)}
