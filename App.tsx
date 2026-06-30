@@ -296,17 +296,27 @@ const BandSettingsModal = ({
     onSave: (s: BandSettings) => void,
     onApplyProfile: (s: Partial<BandSettings>) => void,
     onApplyGigDetails: (s: Partial<GigDetails>) => void,
-    databaseHealth: any
+    databaseHealth?: any
 }) => {
     const [data, setData] = useState<BandSettings>(settings);
     const [memberSlots, setMemberSlots] = useState<string[]>(Array(5).fill(''));
     const [status, setStatus] = useState<{msg: string, isError: boolean} | null>(null);
     const [gigStatus, setGigStatus] = useState<{msg: string, isError: boolean} | null>(null);
     
+    const safeDatabaseHealth = databaseHealth ?? {
+        health: null,
+        status: 'unknown',
+        checking: false,
+        lastCheckedAt: null,
+        refreshHealth: async () => {}
+    };
+    
     useEffect(() => {
         if (isOpen) {
             setData(settings);
-            const currentMembers = [...settings.members];
+            const currentMembers = Array.isArray(settings.members)
+                ? [...settings.members]
+                : [];
             while (currentMembers.length < 5) currentMembers.push('');
             setMemberSlots(currentMembers.slice(0, 5));
             setStatus(null);
@@ -530,42 +540,42 @@ const BandSettingsModal = ({
                             <div className="flex justify-between">
                                 <span className="text-zinc-400">Database variable:</span>
                                 <span className="font-semibold text-zinc-200">
-                                    {databaseHealth.health?.databaseUrlPresent !== false ? 'Detected' : 'Not detected'}
+                                    {safeDatabaseHealth.health?.databaseUrlPresent !== false ? 'Detected' : 'Not detected'}
                                 </span>
                             </div>
                             <div className="flex justify-between">
                                 <span className="text-zinc-400">Neon connection:</span>
                                 <span className={`font-semibold ${
-                                    databaseHealth.status === 'connected' ? 'text-emerald-400' :
-                                    databaseHealth.status === 'connection-failed' ? 'text-rose-400' :
-                                    databaseHealth.status === 'variable-missing' ? 'text-amber-400' : 'text-zinc-400'
+                                    safeDatabaseHealth.status === 'connected' ? 'text-emerald-400' :
+                                    safeDatabaseHealth.status === 'connection-failed' ? 'text-rose-400' :
+                                    safeDatabaseHealth.status === 'variable-missing' ? 'text-amber-400' : 'text-zinc-400'
                                 }`}>
-                                    {databaseHealth.status === 'connected' && 'Connected'}
-                                    {databaseHealth.status === 'connection-failed' && 'Failed'}
-                                    {databaseHealth.status === 'variable-missing' && 'Not tested'}
-                                    {databaseHealth.status === 'checking' && 'Checking...'}
-                                    {databaseHealth.status === 'unknown' && 'Unknown'}
+                                    {safeDatabaseHealth.status === 'connected' && 'Connected'}
+                                    {safeDatabaseHealth.status === 'connection-failed' && 'Failed'}
+                                    {safeDatabaseHealth.status === 'variable-missing' && 'Not tested'}
+                                    {safeDatabaseHealth.status === 'checking' && 'Checking...'}
+                                    {safeDatabaseHealth.status === 'unknown' && 'Unknown'}
                                 </span>
                             </div>
                             <div className="flex justify-between">
                                 <span className="text-zinc-400">Environment:</span>
                                 <span className="font-semibold text-zinc-200">
-                                    {databaseHealth.health?.environment === 'production' ? 'Production' :
-                                     databaseHealth.health?.environment === 'preview' ? 'Preview' :
-                                     databaseHealth.health?.environment === 'development' ? 'Development' : 
-                                     databaseHealth.health?.environment || 'Unknown'}
+                                    {safeDatabaseHealth.health?.environment === 'production' ? 'Production' :
+                                     safeDatabaseHealth.health?.environment === 'preview' ? 'Preview' :
+                                     safeDatabaseHealth.health?.environment === 'development' ? 'Development' : 
+                                     safeDatabaseHealth.health?.environment || 'Unknown'}
                                 </span>
                             </div>
-                            {databaseHealth.health?.region && (
+                            {safeDatabaseHealth.health?.region && (
                                 <div className="flex justify-between">
                                     <span className="text-zinc-400">Region:</span>
-                                    <span className="font-semibold text-zinc-200">{databaseHealth.health.region}</span>
+                                    <span className="font-semibold text-zinc-200">{safeDatabaseHealth.health.region}</span>
                                 </div>
                             )}
-                            {databaseHealth.lastCheckedAt && (
+                            {safeDatabaseHealth.lastCheckedAt && (
                                 <div className="flex justify-between">
                                     <span className="text-zinc-400">Last checked:</span>
-                                    <span className="text-zinc-400">{databaseHealth.lastCheckedAt.toLocaleTimeString()}</span>
+                                    <span className="text-zinc-400">{safeDatabaseHealth.lastCheckedAt.toLocaleTimeString()}</span>
                                 </div>
                             )}
                         </div>
@@ -573,12 +583,12 @@ const BandSettingsModal = ({
                         <div className="pt-1">
                             <button
                                 type="button"
-                                onClick={() => databaseHealth.refreshHealth()}
-                                disabled={databaseHealth.checking}
+                                onClick={() => safeDatabaseHealth.refreshHealth()}
+                                disabled={safeDatabaseHealth.checking}
                                 className="w-full py-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-white rounded text-xs font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                             >
-                                <Icons.Refresh size={11} className={databaseHealth.checking ? 'animate-spin' : ''} />
-                                {databaseHealth.checking ? 'Testing...' : 'Test Database Connection'}
+                                <Icons.Refresh size={11} className={safeDatabaseHealth.checking ? 'animate-spin' : ''} />
+                                {safeDatabaseHealth.checking ? 'Testing...' : 'Test Database Connection'}
                             </button>
                         </div>
                         <p className="text-[10px] text-zinc-600 leading-normal">
@@ -2198,6 +2208,7 @@ Deployment ID: ${deploymentId}`;
              isOpen={showBandSettings}
              onClose={() => setShowBandSettings(false)}
              settings={bandSettings}
+             databaseHealth={databaseHealth}
              onSave={(s) => {
                  setBandSettings(s);
                  markDirty();
