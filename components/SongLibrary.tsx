@@ -113,7 +113,7 @@ const DraggableLibrarySong: React.FC<{
 
                  {viewOptions.showLive && song.playedLive && (
                      <span className="text-[10px] font-bold text-green-500 flex items-center gap-1 bg-green-500/10 px-1.5 py-0.5 rounded border border-green-500/20">
-                         <Icons.Check size={8} /> Live
+                          <Icons.Check size={8} /> Live
                      </span>
                  )}
             </div>
@@ -132,60 +132,6 @@ const DraggableLibrarySong: React.FC<{
                    <Icons.Play size={16} />
                </button>
 
-               <div className="grid grid-cols-2 gap-1">
-                 {sets
-                   .slice()
-                   .sort(
-                     (a, b) =>
-                       Number(a.setNumber ?? 0) -
-                       Number(b.setNumber ?? 0)
-                   )
-                   .map(set => {
-                     const usageList =
-                       Array.isArray(safeUsage[song.id])
-                         ? safeUsage[song.id]
-                         : [];
-
-                     const alreadyInSet =
-                       usageList.some(
-                         item => item.setId === set.id
-                       );
-
-                     return (
-                       <button
-                         key={set.id}
-                         type="button"
-                         disabled={alreadyInSet}
-                         title={
-                           alreadyInSet
-                             ? `Already in Set ${set.setNumber}`
-                             : `Add to Set ${set.setNumber}`
-                         }
-                         onPointerDown={event =>
-                           event.stopPropagation()
-                         }
-                         onClick={event => {
-                           event.stopPropagation();
-
-                           if (!alreadyInSet) {
-                             onAddSongToSet(
-                               song.id,
-                               set.id
-                             );
-                           }
-                         }}
-                         className={
-                           alreadyInSet
-                             ? 'min-w-7 rounded border border-primary/40 bg-primary/25 px-1.5 py-1 text-[10px] font-bold text-primary cursor-default font-mono'
-                             : 'min-w-7 rounded border border-zinc-700 bg-zinc-800 px-1.5 py-1 text-[10px] font-bold text-zinc-300 hover:border-primary/40 hover:bg-primary/20 hover:text-primary font-mono'
-                         }
-                       >
-                         S{set.setNumber}
-                       </button>
-                     );
-                   })}
-               </div>
-
                <button 
                 type="button"
                 title="Details & Edit"
@@ -196,6 +142,63 @@ const DraggableLibrarySong: React.FC<{
                    <Icons.Info size={16} />
                </button>
           </div>
+      </div>
+
+      {/* Dynamic quick-add buttons row */}
+      <div className="mt-3 flex flex-wrap gap-1.5 pl-6">
+        {sets
+          .slice()
+          .sort(
+            (a, b) =>
+              Number(a.setNumber ?? 0) -
+              Number(b.setNumber ?? 0)
+          )
+          .map(set => {
+            const alreadyInSet =
+              Array.isArray(set.songs) &&
+              set.songs.some(item => {
+                const itemSongId = item.songId;
+
+                return String(itemSongId) ===
+                  String(song.id);
+              });
+
+            return (
+              <button
+                key={set.id}
+                type="button"
+                disabled={alreadyInSet}
+                aria-disabled={alreadyInSet}
+                title={
+                  alreadyInSet
+                    ? `Already in Set ${set.setNumber}`
+                    : `Add to Set ${set.setNumber}`
+                }
+                onPointerDown={event =>
+                  event.stopPropagation()
+                }
+                onClick={event => {
+                  event.stopPropagation();
+
+                  if (alreadyInSet) {
+                    return;
+                  }
+
+                  onAddSongToSet(
+                    song.id,
+                    set.id
+                  );
+                }}
+                className={
+                  alreadyInSet
+                    ? 'min-w-8 rounded border border-primary/40 bg-primary/25 px-2 py-1 text-[10px] font-bold text-primary opacity-60 cursor-not-allowed pointer-events-none font-mono'
+                    : 'min-w-8 rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-[10px] font-bold text-zinc-300 hover:border-primary/40 hover:bg-primary/20 hover:text-primary cursor-pointer font-mono'
+                }
+              >
+                S{set.setNumber}
+              </button>
+            );
+          })}
       </div>
     </div>
   );
