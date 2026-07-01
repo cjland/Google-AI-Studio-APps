@@ -7,6 +7,24 @@ import { getCurrentBand } from './_lib/currentBand.js';
 import { mapGig, mapGigSet } from './_lib/mappers.js';
 import { getSql } from './_lib/db.js';
 
+function normalizeGigStatus(status: any): string {
+  const normalized = String(status || 'draft').trim().toLowerCase();
+
+  if (normalized === 'proposed' || normalized === 'draft') {
+    return 'draft';
+  }
+  if (normalized === 'final' || normalized === 'upcoming') {
+    return 'upcoming';
+  }
+  if (normalized === 'completed') {
+    return 'completed';
+  }
+  if (normalized === 'cancelled') {
+    return 'cancelled';
+  }
+  return 'draft';
+}
+
 let pool: Pool | null = null;
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -98,7 +116,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           startTime || '',
           arriveTime || '',
           notes || '',
-          status || 'Draft'
+          normalizeGigStatus(status)
         ]
       );
 
@@ -108,7 +126,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         `INSERT INTO gig_sets (
           id, gig_id, name, set_number, sort_order, status, target_duration_seconds, updated_at
         ) VALUES (
-          $1, $2, $3, 1, 1, 'Draft', NULL, NOW()
+          $1, $2, $3, 1, 1, 'draft', NULL, NOW()
         ) RETURNING *`,
         [newSetId, newGigId, 'Set 1']
       );
@@ -157,7 +175,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           startTime !== undefined ? startTime : null,
           arriveTime !== undefined ? arriveTime : null,
           notes !== undefined ? notes : null,
-          status !== undefined ? status : null,
+          status !== undefined ? normalizeGigStatus(status) : null,
           id,
           band.id
         ]

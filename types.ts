@@ -20,6 +20,7 @@ export interface Song {
 export interface SetSong {
   instanceId: string;
   songId: string;
+  setId?: string;
   position: number;
   notes?: string | null;
 
@@ -42,6 +43,7 @@ export type SetStatus = 'Draft' | 'Final' | 'Proposed';
 export interface SetList {
   id: string;
   name: string;
+  setNumber?: number;
   songs: SetSong[];
   color?: string; // For visual distinction
   status?: SetStatus;
@@ -69,9 +71,9 @@ export interface BandSettings {
     name: string;
     logoUrl: string;
     members: string[]; // List of names
-    defaultLibraryUrl?: string; // URL to fetch initial library from (e.g. Google Sheets)
-    bandProfileUrl?: string; // URL to fetch band profile info
-    gigDetailsUrl?: string; // URL to fetch gig details
+    defaultLibraryUrl?: string;
+    gigDetailsUrl?: string;
+    bandProfileUrl?: string;
 }
 
 export interface PDFOptions {

@@ -23,6 +23,90 @@ function isValidUUID(val: string): boolean {
   return regex.test(val);
 }
 
+function normalizeSongStatus(song: any): string {
+  const normalized = String(
+    song?.status ??
+    song?.practiceStatus ??
+    'ready'
+  )
+    .trim()
+    .toLowerCase();
+
+  if (normalized === 'practice') {
+    return 'practice';
+  }
+
+  if (normalized === 'live') {
+    return 'live';
+  }
+
+  if (
+    normalized === 'inactive' ||
+    normalized === 'archived'
+  ) {
+    return 'inactive';
+  }
+
+  return 'ready';
+}
+
+function normalizeGigStatus(
+  value: unknown
+): string {
+  const normalized =
+    String(value ?? 'draft')
+      .trim()
+      .toLowerCase();
+
+  if (normalized === 'upcoming') {
+    return 'upcoming';
+  }
+
+  if (
+    normalized === 'completed' ||
+    normalized === 'complete'
+  ) {
+    return 'completed';
+  }
+
+  if (
+    normalized === 'cancelled' ||
+    normalized === 'canceled'
+  ) {
+    return 'cancelled';
+  }
+
+  return 'draft';
+}
+
+function normalizeGigSetStatus(
+  value: unknown
+): string {
+  const normalized =
+    String(value ?? 'draft')
+      .trim()
+      .toLowerCase();
+
+  if (normalized === 'active') {
+    return 'active';
+  }
+
+  if (
+    normalized === 'completed' ||
+    normalized === 'complete'
+  ) {
+    return 'completed';
+  }
+
+  if (
+    normalized === 'locked'
+  ) {
+    return 'locked';
+  }
+
+  return 'draft';
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'PUT') {
     res.setHeader('Allow', ['PUT']);
@@ -36,6 +120,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   let currentStage = 'validate-payload';
+  let stage = 'validate-payload';
 
   const { bandSettings, songs, gig, sets } = req.body || {};
 
@@ -171,6 +256,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     await client.query('BEGIN');
 
     // 2. Update Band
+    stage = 'save-band';
     currentStage = 'save-band';
     const bandResult = await client.query(
       `UPDATE public.bands
@@ -178,19 +264,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
          name = $1,
          logo_url = $2,
          members = $3,
-         default_library_url = $4,
-         band_profile_url = $5,
-         gig_details_url = $6,
          updated_at = NOW()
-       WHERE id = $7
+       WHERE id = $4
        RETURNING
          id,
          name,
          logo_url,
          members,
-         default_library_url,
-         band_profile_url,
-         gig_details_url,
          created_at,
          updated_at`,
       [
@@ -203,9 +283,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               )
               .filter(Boolean)
           : [],
-        bandSettings.defaultLibraryUrl || null,
-        bandSettings.bandProfileUrl || null,
-        bandSettings.gigDetailsUrl || null,
         band.id
       ]
     );
@@ -217,52 +294,91 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const dbSongs: any[] = [];
     for (const song of songs) {
       const finalSongId = songIdMap[song.id];
-      const duration = Number(song.durationSeconds) || 0;
-      const rating = song.rating ? Number(song.rating) : null;
-      const tags = Array.isArray(song.tags) ? song.tags : [];
+      const databaseStatus = normalizeSongStatus(song);
+      stage = `upsert-song:${song.title || song.id}`;
+      currentStage = stage;
 
       const sRes = await client.query(
-        `INSERT INTO songs (
-          id, band_id, external_id, title, artist, duration_seconds, video_url, tags, rating, status, guitar_url, bass_url, lyrics_url, notes, updated_at
-        ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW()
+        `INSERT INTO public.songs (
+          id,
+          band_id,
+          external_id,
+          title,
+          artist,
+          duration_seconds,
+          rating,
+          status,
+          video_url,
+          guitar_url,
+          bass_url,
+          lyrics_url,
+          notes,
+          tags,
+          google_sheet_row,
+          source_updated_at,
+          updated_at
         )
-        ON CONFLICT (id) DO UPDATE SET
+        VALUES (
+          $1,
+          $2,
+          $3,
+          $4,
+          $5,
+          $6,
+          $7,
+          $8,
+          $9,
+          $10,
+          $11,
+          $12,
+          $13,
+          $14,
+          $15,
+          $16,
+          NOW()
+        )
+        ON CONFLICT (id)
+        DO UPDATE SET
           external_id = EXCLUDED.external_id,
           title = EXCLUDED.title,
           artist = EXCLUDED.artist,
           duration_seconds = EXCLUDED.duration_seconds,
-          video_url = EXCLUDED.video_url,
-          tags = EXCLUDED.tags,
           rating = EXCLUDED.rating,
           status = EXCLUDED.status,
+          video_url = EXCLUDED.video_url,
           guitar_url = EXCLUDED.guitar_url,
           bass_url = EXCLUDED.bass_url,
           lyrics_url = EXCLUDED.lyrics_url,
           notes = EXCLUDED.notes,
+          tags = EXCLUDED.tags,
+          google_sheet_row = EXCLUDED.google_sheet_row,
+          source_updated_at = EXCLUDED.source_updated_at,
           updated_at = NOW()
         RETURNING *`,
         [
           finalSongId,
           band.id,
           song.externalId || null,
-          song.title,
+          song.title || 'Untitled Song',
           song.artist || 'Unknown Artist',
-          duration,
+          Number(song.durationSeconds) || 0,
+          song.rating === null || song.rating === undefined ? null : Number(song.rating),
+          databaseStatus,
           song.videoUrl || null,
-          tags,
-          rating,
-          song.practiceStatus || 'Draft',
           song.guitarLessonUrl || null,
           song.bassLessonUrl || null,
           song.lyricsUrl || null,
-          song.generalNotes || null
+          song.generalNotes || null,
+          Array.isArray(song.tags) ? song.tags : [],
+          song.googleSheetRow === null || song.googleSheetRow === undefined ? null : Number(song.googleSheetRow),
+          song.sourceUpdatedAt || null
         ]
       );
       dbSongs.push(mapSong(sRes.rows[0]));
     }
 
     // 6. Delete placements/sets removed from submitted sets/gig
+    stage = 'delete-removed-songs';
     currentStage = 'delete-removed-songs';
     if (activeSetIds.length > 0) {
       if (activePlacementIds.length > 0) {
@@ -297,6 +413,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // 4. Upsert Gig
+    const databaseGigStatus = normalizeGigStatus(gig.status);
+    stage = `save-gig:${gig.name || gig.id}`;
     currentStage = 'save-gig';
     const gRes = await client.query(
       `INSERT INTO gigs (
@@ -323,7 +441,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         gig.startTime || '',
         gig.arriveTime || '',
         gig.notes || '',
-        gig.status || 'Draft'
+        databaseGigStatus
       ]
     );
     const dbGig = mapGig(gRes.rows[0]);
@@ -338,6 +456,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const setNumber = setItem.setNumber || (i + 1);
       const sortOrder = setItem.sortOrder !== undefined ? setItem.sortOrder : (i + 1);
       const targetDuration = setItem.targetDurationSeconds ? Number(setItem.targetDurationSeconds) : null;
+
+      const databaseSetStatus = normalizeGigSetStatus(setItem.status);
+      stage = `save-set:${setItem.name || setItem.id}`;
 
       const setRes = await client.query(
         `INSERT INTO gig_sets (
@@ -359,7 +480,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           setItem.name,
           setNumber,
           sortOrder,
-          setItem.status || 'Draft',
+          databaseSetStatus,
           targetDuration
         ]
       );
@@ -381,6 +502,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const pSong = placementSongs[pIdx];
         const finalPlacementId = placementIdMap[pSong.instanceId];
         const realSongId = songIdMap[pSong.songId] || pSong.songId;
+
+        stage = `save-placement:${pSong.songId}`;
 
         const pRes = await client.query(
           `INSERT INTO set_songs (
@@ -491,13 +614,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    console.error(`Save state failed at stage "${currentStage}":`, error);
+    console.error(`Save state failed at stage "${stage}":`, error);
     return res.status(500).json({
       ok: false,
-      stage: currentStage,
-      message: error.message || 'Failed to save application state',
-      code: error.code || 'SAVE_STATE_ERROR',
-      detail: error.detail || error.stack || null
+      stage,
+      message:
+        error?.message ||
+        'Unable to save state.',
+      code: error?.code || null,
+      detail: error?.detail || null,
+      hint: error?.hint || null,
+      constraint:
+        error?.constraint || null,
+      column:
+        error?.column || null,
+      table:
+        error?.table || null,
+      schema:
+        error?.schema || null,
+      severity:
+        error?.severity || null
     });
   } finally {
     if (client) {

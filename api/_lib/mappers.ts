@@ -10,12 +10,6 @@ export function mapBand(row: any) {
     members: Array.isArray(row.members)
       ? row.members
       : [],
-    defaultLibraryUrl:
-      row.default_library_url || '',
-    bandProfileUrl:
-      row.band_profile_url || '',
-    gigDetailsUrl:
-      row.gig_details_url || '',
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };

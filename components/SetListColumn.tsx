@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -18,6 +18,7 @@ interface SetListColumnProps {
   onPlaySong: (song: SetSong) => void;
   onUpdateSetDetails: (setId: string, updates: Partial<SetList>) => void;
   onEditSong: (song: Song) => void;
+  onAddSongToSet: (songId: string, setId: string) => void;
 }
 
 interface SortableSetSongProps {
@@ -202,7 +203,8 @@ export const SetListColumn: React.FC<SetListColumnProps> = ({
   onUpdateNote,
   onPlaySong,
   onUpdateSetDetails,
-  onEditSong
+  onEditSong,
+  onAddSongToSet
 }) => {
   // Sortable Logic for the Column itself
   const {
@@ -228,6 +230,8 @@ export const SetListColumn: React.FC<SetListColumnProps> = ({
     data: { type: 'SET', data: setList }
   });
 
+  const [dragOverSetId, setDragOverSetId] = useState<string | null>(null);
+
   const totalDuration = setList.songs.reduce((acc, s) => acc + s.durationSeconds, 0);
 
   const getStatusColor = (s?: SetStatus) => {
@@ -243,7 +247,49 @@ export const SetListColumn: React.FC<SetListColumnProps> = ({
         id={`set-col-${setList.id}`}
         ref={setSortableRef} 
         style={style} 
-        className="flex flex-col h-full min-w-[320px] max-w-[400px] w-full bg-surface rounded-xl border border-white/5 shadow-xl overflow-hidden relative"
+        onDragOver={event => {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'copy';
+        }}
+        onDragEnter={event => {
+          event.preventDefault();
+          setDragOverSetId(setList.id);
+        }}
+        onDragLeave={event => {
+          if (event.currentTarget === event.target) {
+            setDragOverSetId(null);
+          }
+        }}
+        onDrop={event => {
+          event.preventDefault();
+          setDragOverSetId(null);
+
+          try {
+            const raw = event.dataTransfer.getData('application/x-setlist-song');
+
+            if (raw) {
+              const payload = JSON.parse(raw);
+
+              if (payload?.source === 'library' && payload?.songId) {
+                onAddSongToSet(payload.songId, setList.id);
+                return;
+              }
+            }
+
+            const fallbackSongId = event.dataTransfer.getData('text/plain');
+
+            if (fallbackSongId) {
+              onAddSongToSet(fallbackSongId, setList.id);
+            }
+          } catch (error) {
+            console.error('Library song drop failed', error);
+          }
+        }}
+        className={`flex flex-col h-full min-w-[320px] max-w-[400px] w-full bg-surface rounded-xl border shadow-xl overflow-hidden relative transition-colors ${
+          dragOverSetId === setList.id
+            ? 'border-primary bg-primary/5'
+            : 'border-white/5'
+        }`}
     >
       {/* Set Header */}
       <div className="border-b border-white/5 bg-gradient-to-r from-surface to-surfaceHighlight">
@@ -323,7 +369,7 @@ export const SetListColumn: React.FC<SetListColumnProps> = ({
             <Icons.Music size={12} />
             <span>{setList.songs.length} Songs</span>
           </div>
-          <div className="flex items-center gap-1 font-mono text-primary">
+          <div className="flex items-center gap-1 font-mono bg-purple-600 text-white px-2 py-0.5 rounded-full text-[11px] font-semibold shrink-0">
             <Icons.Clock size={12} />
             <span>{formatDurationHuman(totalDuration)}</span>
           </div>

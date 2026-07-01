@@ -286,25 +286,16 @@ const BandSettingsModal = ({
     onClose, 
     settings, 
     onSave,
-    onApplyProfile,
-    onApplyGigDetails,
-    databaseHealth,
-    onLoadLibrary
+    databaseHealth
 }: { 
     isOpen: boolean, 
     onClose: () => void, 
     settings: BandSettings, 
     onSave: (s: BandSettings) => void,
-    onApplyProfile: (s: Partial<BandSettings>) => void,
-    onApplyGigDetails: (s: Partial<GigDetails>) => void,
-    databaseHealth?: any,
-    onLoadLibrary: (url: string) => Promise<void>
+    databaseHealth?: any
 }) => {
     const [data, setData] = useState<BandSettings>(settings);
     const [memberSlots, setMemberSlots] = useState<string[]>(Array(5).fill(''));
-    const [status, setStatus] = useState<{msg: string, isError: boolean} | null>(null);
-    const [gigStatus, setGigStatus] = useState<{msg: string, isError: boolean} | null>(null);
-    const [libraryStatus, setLibraryStatus] = useState<{msg: string, isError: boolean} | null>(null);
     
     const safeDatabaseHealth = databaseHealth ?? {
         health: null,
@@ -322,9 +313,6 @@ const BandSettingsModal = ({
                 : [];
             while (currentMembers.length < 5) currentMembers.push('');
             setMemberSlots(currentMembers.slice(0, 5));
-            setStatus(null);
-            setGigStatus(null);
-            setLibraryStatus(null);
         }
     }, [isOpen, settings]);
 
@@ -332,115 +320,6 @@ const BandSettingsModal = ({
         const newSlots = [...memberSlots];
         newSlots[index] = value;
         setMemberSlots(newSlots);
-    };
-
-    const handleFetchProfile = async () => {
-        setStatus({ msg: 'Loading...', isError: false });
-        if (!data.bandProfileUrl) return;
-        
-        const url = transformGoogleSheetUrl(data.bandProfileUrl);
-
-        try {
-            const res = await fetch(url);
-            if (!res.ok) throw new Error('Network response was not ok');
-            const text = await res.text();
-            
-            if (text.trim().startsWith("<!DOCTYPE html") || text.trim().startsWith("<html")) {
-                 throw new Error("Google returned HTML. Make sure the sheet is Public.");
-            }
-
-            const parsed = parseBandProfileCSV(text);
-            
-            if (Object.keys(parsed).length > 0) {
-                 const newMembers = parsed.members && parsed.members.length > 0 ? parsed.members : data.members;
-                 const paddedMembers = [...newMembers];
-                 while (paddedMembers.length < 5) paddedMembers.push('');
-                 const finalSlots = paddedMembers.slice(0, 5);
-
-                 const newData = {
-                     ...data,
-                     name: parsed.name || data.name,
-                     logoUrl: parsed.logoUrl || data.logoUrl,
-                     members: newMembers
-                 };
-                 
-                 setData(newData);
-                 setMemberSlots(finalSlots);
-                 onApplyProfile(newData);
-                 setStatus({ msg: 'Profile loaded and applied!', isError: false });
-                 setTimeout(() => setStatus(null), 3000);
-            } else {
-                 setStatus({ msg: 'No valid band info found in CSV.', isError: true });
-            }
-        } catch (error) {
-            console.error("Failed to fetch band profile", error);
-            setStatus({ msg: 'Failed to load profile. Check URL & permissions.', isError: true });
-        }
-    };
-
-    const handleFetchGigDetails = async () => {
-        setGigStatus({ msg: 'Loading...', isError: false });
-        if (!data.gigDetailsUrl) return;
-
-        const url = transformGoogleSheetUrl(data.gigDetailsUrl);
-
-        try {
-            const res = await fetch(url);
-            if (!res.ok) throw new Error('Network response was not ok');
-            const text = await res.text();
-            if (text.trim().startsWith("<!DOCTYPE html") || text.trim().startsWith("<html")) {
-                throw new Error("Google returned HTML. Make sure the sheet is Public.");
-            }
-
-            const parsed = parseGigDetailsCSV(text);
-
-            if (Object.keys(parsed).length > 0) {
-                onApplyGigDetails(parsed);
-                setGigStatus({ msg: 'Gig details loaded and applied!', isError: false });
-                setTimeout(() => setGigStatus(null), 3000);
-            } else {
-                setGigStatus({ msg: 'No valid gig details found in CSV.', isError: true });
-            }
-        } catch (error) {
-            console.error("Failed to fetch gig details", error);
-            setGigStatus({ msg: 'Failed to load gig details.', isError: true });
-        }
-    };
-
-    const handleFetchLibrary = async () => {
-        const sourceUrl = data.defaultLibraryUrl?.trim();
-
-        if (!sourceUrl) {
-            setLibraryStatus({
-                msg: 'Enter a Default Library URL first.',
-                isError: true
-            });
-            return;
-        }
-
-        setLibraryStatus({
-            msg: 'Loading song library...',
-            isError: false
-        });
-
-        try {
-            await onLoadLibrary(sourceUrl);
-
-            setLibraryStatus({
-                msg: 'Song library loaded into the Import dialog.',
-                isError: false
-            });
-        } catch (error) {
-            console.error('Failed to load default library', error);
-
-            setLibraryStatus({
-                msg:
-                    error instanceof Error
-                        ? error.message
-                        : 'Failed to load song library.',
-                isError: true
-            });
-        }
     };
 
     if (!isOpen) return null;
@@ -453,35 +332,6 @@ const BandSettingsModal = ({
                     <button onClick={onClose}><Icons.Close size={20} className="text-zinc-500"/></button>
                 </div>
                 <div className="p-6 space-y-4 max-h-[80vh] overflow-y-auto custom-scrollbar">
-                     <div>
-                        <label className="block text-xs text-zinc-500 mb-1">Band Profile URL (CSV/Google Sheet)</label>
-                        <div className="flex gap-2">
-                             <input 
-                                type="text" 
-                                className="flex-1 bg-background border border-zinc-700 rounded p-2 text-sm text-white focus:border-primary outline-none"
-                                value={data.bandProfileUrl || ''}
-                                onChange={e => setData({...data, bandProfileUrl: e.target.value})}
-                                placeholder="https://docs.google.com/spreadsheets/..."
-                            />
-                            <button 
-                                onClick={handleFetchProfile}
-                                className="px-3 py-1 bg-zinc-800 text-xs text-white rounded hover:bg-zinc-700 border border-white/5 whitespace-nowrap"
-                                disabled={!data.bandProfileUrl}
-                            >
-                                Load Profile
-                            </button>
-                        </div>
-                        {status ? (
-                            <p className={`text-[10px] mt-1 font-medium ${status.isError ? 'text-red-400' : 'text-green-400'}`}>
-                                {status.msg}
-                            </p>
-                        ) : (
-                            <p className="text-[10px] text-zinc-600 mt-1">Loads Name, Logo, and Members from a spreadsheet.</p>
-                        )}
-                    </div>
-
-                    <div className="h-px bg-white/5 my-4"></div>
-
                     <div className="space-y-4">
                         <h4 className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">Band Preferences</h4>
 
@@ -527,81 +377,6 @@ const BandSettingsModal = ({
                                 ))}
                              </div>
                         </div>
-                    </div>
-
-                    <div className="h-px bg-white/5 my-4"></div>
-
-                    <div>
-                        <label className="block text-xs text-zinc-500 mb-1">
-                            Default Library URL (CSV/Google Sheet)
-                        </label>
-
-                        <div className="flex gap-2">
-                            <input
-                                type="text"
-                                className="flex-1 bg-background border border-zinc-700 rounded p-2 text-sm text-white focus:border-primary outline-none"
-                                value={data.defaultLibraryUrl || ''}
-                                onChange={e =>
-                                    setData({
-                                        ...data,
-                                        defaultLibraryUrl: e.target.value
-                                    })
-                                }
-                                placeholder="https://docs.google.com/spreadsheets/..."
-                            />
-
-                            <button
-                                type="button"
-                                onClick={handleFetchLibrary}
-                                className="px-3 py-1 bg-zinc-800 text-xs text-white rounded hover:bg-zinc-700 border border-white/5 whitespace-nowrap"
-                                disabled={!data.defaultLibraryUrl}
-                            >
-                                Load Library
-                            </button>
-                        </div>
-
-                        {libraryStatus ? (
-                            <p
-                                className={`text-[10px] mt-1 font-medium ${
-                                    libraryStatus.isError
-                                        ? 'text-red-400'
-                                        : 'text-green-400'
-                                }`}
-                            >
-                                {libraryStatus.msg}
-                            </p>
-                        ) : (
-                            <p className="text-[10px] text-zinc-600 mt-1">
-                                Loads the spreadsheet into the Import Song Library dialog for review.
-                            </p>
-                        )}
-                    </div>
-
-                    <div>
-                        <label className="block text-xs text-zinc-500 mb-1">Gig Details URL (CSV/Google Sheet)</label>
-                        <div className="flex gap-2">
-                            <input 
-                                type="text" 
-                                className="flex-1 bg-background border border-zinc-700 rounded p-2 text-sm text-white focus:border-primary outline-none"
-                                value={data.gigDetailsUrl || ''}
-                                onChange={e => setData({...data, gigDetailsUrl: e.target.value})}
-                                placeholder="https://docs.google.com/spreadsheets/..."
-                            />
-                             <button 
-                                onClick={handleFetchGigDetails}
-                                className="px-3 py-1 bg-zinc-800 text-xs text-white rounded hover:bg-zinc-700 border border-white/5 whitespace-nowrap"
-                                disabled={!data.gigDetailsUrl}
-                            >
-                                Load Details
-                            </button>
-                        </div>
-                         {gigStatus ? (
-                            <p className={`text-[10px] mt-1 font-medium ${gigStatus.isError ? 'text-red-400' : 'text-green-400'}`}>
-                                {gigStatus.msg}
-                            </p>
-                        ) : (
-                            <p className="text-[10px] text-zinc-600 mt-1">Imports Gig Name, Location, Date, Time, and Notes.</p>
-                        )}
                     </div>
 
                     <div className="h-px bg-white/5 my-4"></div>
@@ -840,7 +615,8 @@ export default function App() {
   const [showBandSettings, setShowBandSettings] = useState(false);
   const [showPDFOptions, setShowPDFOptions] = useState(false);
   const [importText, setImportText] = useState('');
-  const [importSaveStatus, setImportSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle');
+  const [isDragging, setIsDragging] = useState(false);
+  const [importSaveStatus, setImportSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'failed' | 'error'>('idle');
   const [importSaveError, setImportSaveError] = useState<string>('');
   
   const [editingSong, setEditingSong] = useState<Song | null>(null);
@@ -853,10 +629,73 @@ export default function App() {
       source?: string;
     } | null>(null);
 
+  function isIgnorableDevelopmentError(
+    reason: unknown
+  ): boolean {
+    const message =
+      reason instanceof Error
+        ? reason.message
+        : String(reason ?? '');
+
+    const stack =
+      reason instanceof Error
+        ? reason.stack || ''
+        : '';
+
+    const combined =
+      `${message}\n${stack}`.toLowerCase();
+
+    const isViteClientError =
+      combined.includes('@vite/client') ||
+      combined.includes('/@vite/client');
+
+    const isWebSocketDisconnect =
+      combined.includes(
+        'websocket closed without opened'
+      ) ||
+      combined.includes(
+        'websocket closed before the connection is established'
+      ) ||
+      combined.includes(
+        'failed to construct websocket'
+      );
+
+    const isDevelopmentHost =
+      window.location.hostname.includes(
+        'run.app'
+      ) ||
+      window.location.hostname.includes(
+        'localhost'
+      ) ||
+      window.location.hostname.includes(
+        '127.0.0.1'
+      );
+
+    return (
+      isDevelopmentHost &&
+      isViteClientError &&
+      isWebSocketDisconnect
+    );
+  }
+
   useEffect(() => {
     const handleWindowError = (
       event: ErrorEvent
     ) => {
+      if (
+        isIgnorableDevelopmentError(
+          event.error || event.message
+        )
+      ) {
+        console.warn(
+          'Vite HMR connection disconnected; ignoring.',
+          event.error || event.message
+        );
+
+        event.preventDefault();
+        return;
+      }
+
       console.error(
         'WINDOW_RUNTIME_ERROR',
         event.error || event.message
@@ -880,6 +719,18 @@ export default function App() {
       event: PromiseRejectionEvent
     ) => {
       const reason = event.reason;
+
+      if (
+        isIgnorableDevelopmentError(reason)
+      ) {
+        console.warn(
+          'Vite HMR connection disconnected; ignoring.',
+          reason
+        );
+
+        event.preventDefault();
+        return;
+      }
 
       console.error(
         'UNHANDLED_PROMISE_REJECTION',
@@ -1230,42 +1081,7 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [isDirty, sets, songs, gigDetails, bandSettings, isInitialized, setupRequired]);
 
-  // Save when the song list changes and dirty is true, ensuring the save payload uses the latest songs state
-  useEffect(() => {
-    if (
-      isDirty &&
-      songs.length > 0 &&
-      isInitialized &&
-      !setupRequired &&
-      gigDetails.id &&
-      importSaveStatus !== 'saving' &&
-      !saveInProgressRef.current
-    ) {
-      const triggerSongChangeSave = async () => {
-        try {
-          const payload = {
-            bandSettings: saveStateRef.current.bandSettings,
-            songs, // latest songs state
-            gig: {
-              id: saveStateRef.current.gigDetails.id,
-              name: saveStateRef.current.gigDetails.name,
-              location: saveStateRef.current.gigDetails.location,
-              gigDate: saveStateRef.current.gigDetails.date,
-              startTime: saveStateRef.current.gigDetails.startTime,
-              arriveTime: saveStateRef.current.gigDetails.arriveTime,
-              notes: saveStateRef.current.gigDetails.notes,
-              status: saveStateRef.current.gigDetails.status
-            },
-            sets: saveStateRef.current.sets
-          };
-          await saveChanges(payload);
-        } catch (error) {
-          console.error('Immediate song list change save failed:', error);
-        }
-      };
-      triggerSongChangeSave();
-    }
-  }, [songs, importSaveStatus, isDirty, isInitialized, setupRequired, gigDetails.id]);
+
 
   // Duplicate song ids computation
   const duplicateSongIds = useMemo(() => {
@@ -1336,6 +1152,7 @@ export default function App() {
     const newSet: SetList = {
         id: newId,
         name: `Set ${nextNum}`,
+        setNumber: nextNum,
         songs: [],
         color: '',
         status: 'Draft'
@@ -1802,18 +1619,27 @@ const handleImportSongsMatch = async (
       throw new Error(response.detail || 'Save failed');
     }
   } catch (error: any) {
-    console.error(
-      'Song import matching failed',
-      error
-    );
-
     const message =
-      error instanceof Error
-        ? error.message
-        : 'Unexpected song import error';
+      error instanceof ApiRequestError
+        ? String(
+            error.payload?.message ||
+            error.payload?.detail ||
+            error.message
+          )
+        : error instanceof Error
+          ? error.message
+          : String(error);
 
     setImportSaveError(message);
-    setImportSaveStatus('failed');
+    setImportSaveStatus('error');
+
+    console.error(
+      'IMPORT_SAVE_FAILED',
+      {
+        message,
+        error
+      }
+    );
 
     return false;
   }
@@ -1889,11 +1715,15 @@ const handleImportSongsMatch = async (
         const id =
           currentConfirmation.data?.id;
 
-        setSets(currentSets =>
-          currentSets.filter(
+        setSets(currentSets => {
+          const remaining = currentSets.filter(
             set => set.id !== id
-          )
-        );
+          );
+          return remaining.map((set, idx) => ({
+            ...set,
+            setNumber: idx + 1
+          }));
+        });
 
         markDirty();
       } else if (
@@ -1917,9 +1747,8 @@ const handleImportSongsMatch = async (
           );
 
         if (!succeeded) {
-          throw new Error(
-            'Song matching returned an unsuccessful result.'
-          );
+          setConfirmState(null);
+          return;
         }
       } else if (
         currentConfirmation.type ===
@@ -1994,45 +1823,64 @@ const handleImportSongsMatch = async (
     }
   };
 
-  const handleAddSongToSet = (song: Song, targetSetId: string) => {
-    const newSongInstance: SetSong = { 
-        instanceId: `temp-placement-${uuidv4()}`,
-        songId: song.id,
-        position: 0,
-        notes: '',
-        title: song.title,
-        artist: song.artist,
-        durationSeconds: song.durationSeconds,
-        videoUrl: song.videoUrl,
-        tags: song.tags,
-        rating: song.rating,
-        playedLive: song.playedLive,
-        guitarLessonUrl: song.guitarLessonUrl,
-        bassLessonUrl: song.bassLessonUrl,
-        lyricsUrl: song.lyricsUrl,
-        generalNotes: song.generalNotes,
-        practiceStatus: song.practiceStatus
-    };
-
-    if (targetSetId === 'NEW_SET') {
-        const newSetId = `temp-set-${uuidv4()}`;
-        const newSet: SetList = {
-            id: newSetId,
-            name: `Set ${sets.length + 1}`,
-            songs: [newSongInstance],
-            color: '',
-            status: 'Draft'
-        };
-        setSets([...sets, newSet]);
-    } else {
-        setSets(sets.map(s => {
-            if (s.id !== targetSetId) return s;
-            return {
-                ...s,
-                songs: [...s.songs, newSongInstance]
-            };
-        }));
+  const handleAddSongToSet = (songId: string, setId: string) => {
+    const song = songs.find(item => item.id === songId);
+    if (!song) {
+      return;
     }
+
+    if (setId === 'NEW_SET') {
+      const newSetId = `temp-set-${uuidv4()}`;
+      const newSongInstance: SetSong = {
+        ...song,
+        songId: song.id,
+        instanceId: `placement-${uuidv4()}`,
+        setId: newSetId,
+        position: 1,
+        notes: ''
+      };
+      const newSet: SetList = {
+        id: newSetId,
+        name: `Set ${sets.length + 1}`,
+        setNumber: sets.length + 1,
+        songs: [newSongInstance],
+        color: '',
+        status: 'Draft'
+      };
+      setSets([...sets, newSet]);
+    } else {
+      setSets(currentSets =>
+        currentSets.map(set => {
+          if (set.id !== setId) {
+            return set;
+          }
+
+          const alreadyExists = set.songs.some(
+            item => item.songId === songId
+          );
+
+          if (alreadyExists) {
+            return set;
+          }
+
+          return {
+            ...set,
+            songs: [
+              ...set.songs,
+              {
+                ...song,
+                songId: song.id,
+                instanceId: `placement-${uuidv4()}`,
+                setId,
+                position: set.songs.length + 1,
+                notes: ''
+              }
+            ]
+          };
+        })
+      );
+    }
+
     markDirty();
   };
 
@@ -2718,15 +2566,6 @@ Deployment ID: ${deploymentId}`;
                   </div>
 
                   <button 
-                     onClick={handleRefreshGigDetails}
-                     className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-md transition-colors"
-                     title="Refresh Gig Details"
-                     disabled={!gigDetails.id}
-                  >
-                      <Icons.Refresh size={18} />
-                  </button>
-
-                  <button 
                      onClick={() => setShowBandSettings(true)}
                      className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-md transition-colors"
                      title="Band Settings"
@@ -2819,6 +2658,7 @@ Deployment ID: ${deploymentId}`;
                                            onPlaySong={playSong}
                                            onUpdateSetDetails={updateSetDetails}
                                            onEditSong={setEditingSong}
+                                           onAddSongToSet={handleAddSongToSet}
                                        />
                                    ))}
 
@@ -2889,17 +2729,8 @@ Deployment ID: ${deploymentId}`;
              onClose={() => setShowBandSettings(false)}
              settings={bandSettings}
              databaseHealth={databaseHealth}
-             onLoadLibrary={loadLibraryIntoImport}
              onSave={(s) => {
                  setBandSettings(s);
-                 markDirty();
-             }}
-             onApplyProfile={(s) => {
-                 setBandSettings(prev => ({...prev, ...s}));
-                 markDirty();
-             }}
-             onApplyGigDetails={(s) => {
-                 setGigDetails(prev => ({...prev, ...s}));
                  markDirty();
              }}
          />
@@ -3109,10 +2940,76 @@ Deployment ID: ${deploymentId}`;
                      
                      <div className="p-6 overflow-y-auto space-y-4 custom-scrollbar">
                          <p className="text-xs text-zinc-500">
-                             Paste your raw CSV or TSV data below. Matched rows will update existing songs, and new rows will be added with stable temporary identifiers. No songs will be automatically removed from the master library.
+                             Choose a CSV file from your device, drag it into the box below, or paste raw CSV text directly. The CSV must contain at least the <strong>Title</strong> and <strong>Artist</strong> columns (other columns like <strong>Duration (Seconds)</strong>, <strong>Video URL</strong>, <strong>Status</strong>, <strong>Key</strong>, <strong>Tempo</strong>, and <strong>Notes</strong> are optional).
                          </p>
 
-                         {bandSettings.defaultLibraryUrl && (
+                         {/* Drag and Drop Zone */}
+                         <div 
+                             onDragOver={(e) => {
+                                 e.preventDefault();
+                                 setIsDragging(true);
+                             }}
+                             onDragLeave={() => {
+                                 setIsDragging(false);
+                             }}
+                             onDrop={(e) => {
+                                 e.preventDefault();
+                                 setIsDragging(false);
+                                 if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                                     const file = e.dataTransfer.files[0];
+                                     const reader = new FileReader();
+                                     reader.onload = (ev) => {
+                                         const text = ev.target?.result;
+                                         if (typeof text === 'string') {
+                                             setImportText(text);
+                                         }
+                                     };
+                                     reader.readAsText(file);
+                                 }
+                             }}
+                             className={`border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center transition-all cursor-pointer ${
+                                 isDragging 
+                                     ? 'border-primary bg-primary/10 scale-[1.01]' 
+                                     : 'border-zinc-700 hover:border-zinc-500 bg-zinc-900/30 hover:bg-zinc-900/50'
+                             }`}
+                         >
+                             <input 
+                                 type="file" 
+                                 id="csv-file-upload"
+                                 accept=".csv,text/csv" 
+                                 className="hidden" 
+                                 onChange={e => {
+                                     if (e.target.files && e.target.files[0]) {
+                                         const file = e.target.files[0];
+                                         const reader = new FileReader();
+                                         reader.onload = (ev) => {
+                                             const text = ev.target?.result;
+                                             if (typeof text === 'string') {
+                                                 setImportText(text);
+                                             }
+                                         };
+                                         reader.readAsText(file);
+                                     }
+                                 }}
+                             />
+                             <label htmlFor="csv-file-upload" className="flex flex-col items-center justify-center w-full h-full cursor-pointer text-center">
+                                 <Icons.Download size={32} className={`mb-3 ${isDragging ? 'text-primary animate-bounce' : 'text-zinc-500'}`} />
+                                 <p className="text-sm font-semibold text-zinc-200">
+                                     Drag and drop your CSV file here, or <span className="text-primary hover:underline">browse files</span>
+                                 </p>
+                                 <p className="text-xs text-zinc-500 mt-1">
+                                     Supports standard CSV or TSV files
+                                 </p>
+                             </label>
+                         </div>
+
+                         <div className="flex items-center gap-4 my-2">
+                             <div className="h-px bg-white/10 flex-1"></div>
+                             <span className="text-[10px] uppercase font-bold text-zinc-600 tracking-wider">Or paste raw CSV text</span>
+                             <div className="h-px bg-white/10 flex-1"></div>
+                         </div>
+
+                         {false && (
                              <button 
                                  onClick={handleFetchFromUrl}
                                  className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-xs text-white rounded border border-white/5 font-semibold flex items-center gap-1.5 transition-colors"
@@ -3143,7 +3040,7 @@ Deployment ID: ${deploymentId}`;
                                           <span>Imported songs saved to Neon.</span>
                                       </>
                                   )}
-                                  {importSaveStatus === 'failed' && (
+                                  {(importSaveStatus === 'failed' || importSaveStatus === 'error') && (
                                       <>
                                           <Icons.Warning size={14} className="text-red-400"/>
                                           <span>Save failed: {importSaveError}</span>

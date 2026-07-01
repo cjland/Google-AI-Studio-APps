@@ -1,5 +1,4 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { useDraggable } from '@dnd-kit/core';
 import { Song, SetList } from '../types';
 import { Icons } from './ui/Icons';
 import { formatDuration, generateCSV } from '../utils';
@@ -13,7 +12,7 @@ interface SongLibraryProps {
   onUpdateSong: (song: Song) => void;
   onClearLibrary: () => void;
   onEditSong: (song: Song) => void;
-  onAddSongToSet: (song: Song, targetSetId: string) => void;
+  onAddSongToSet: (songId: string, setId: string) => void;
 }
 
 const RatingStars = ({ count }: { count?: number | null }) => (
@@ -30,28 +29,47 @@ const RatingStars = ({ count }: { count?: number | null }) => (
 
 const DraggableLibrarySong: React.FC<{ 
   song: Song; 
-  usageList: {setId: string, setNumber: number, setName: string, count: number}[]; 
   viewOptions: { showRating: boolean, showLive: boolean };
   onPlay: () => void;
   onEdit: () => void;
-  onAdd: () => void;
-  destinationSetName: string;
-}> = ({ song, usageList, viewOptions, onPlay, onEdit, onAdd, destinationSetName }) => {
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
-    id: `lib-${song.id}`,
-    data: { type: 'LIBRARY_SONG', data: song },
-  });
-
+  onAddSongToSet: (songId: string, setId: string) => void;
+  sets: SetList[];
+  safeUsage: Record<string, {setId: string, setNumber: number, setName: string, count: number}[]>;
+}> = ({ song, viewOptions, onPlay, onEdit, onAddSongToSet, sets, safeUsage }) => {
+  const usageList =
+    Array.isArray(safeUsage[song.id])
+      ? safeUsage[song.id]
+      : [];
   const isUsed = usageList && usageList.length > 0;
   // Use practice status for stripe
   const isPractice = song.practiceStatus === 'Practice';
 
   return (
     <div
-      ref={setNodeRef}
+      draggable
+      onDragStart={event => {
+        event.dataTransfer.effectAllowed = 'copy';
+
+        event.dataTransfer.setData(
+          'application/x-setlist-song',
+          JSON.stringify({
+            source: 'library',
+            songId: song.id
+          })
+        );
+
+        event.dataTransfer.setData(
+          'text/plain',
+          song.id
+        );
+
+        event.currentTarget.classList.add('opacity-50');
+      }}
+      onDragEnd={event => {
+        event.currentTarget.classList.remove('opacity-50');
+      }}
       className={`group relative p-3 rounded-lg border transition-all mb-2 overflow-hidden
         ${isUsed ? 'bg-zinc-900/50 border-white/5 opacity-80' : 'bg-surfaceHighlight border-white/5 hover:border-primary/30'}
-        ${isDragging ? 'opacity-50 grayscale' : ''}
       `}
     >
       {/* Warning Stripe for Practice Status */}
@@ -69,11 +87,7 @@ const DraggableLibrarySong: React.FC<{
           <div className="flex-1 min-w-0 pr-2">
             {/* Title & Grip */}
             <div className="flex items-center gap-2 mb-1">
-                <div 
-                    {...listeners} 
-                    {...attributes} 
-                    className="cursor-grab active:cursor-grabbing text-zinc-600 hover:text-zinc-300"
-                >
+                <div className="text-zinc-600 group-hover:text-zinc-400">
                     <Icons.Grip size={14} />
                 </div>
                 <div className={`font-semibold text-sm truncate flex items-center gap-2 ${isUsed ? 'text-zinc-500' : 'text-zinc-200'}`}>
@@ -104,58 +118,80 @@ const DraggableLibrarySong: React.FC<{
                  )}
             </div>
              
-             {/* Used In Sets Badges */}
-             {isUsed && (
-                <div className="pl-6 mt-2 flex flex-wrap gap-1">
-                    {usageList.map((usageItem, i) => {
-                        const countSuffix = usageItem.count > 1 ? ` ×${usageItem.count}` : '';
-                        return (
-                            <span 
-                                key={i} 
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    const el = document.getElementById(`set-col-${usageItem.setId}`);
-                                    if (el) {
-                                        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                        el.classList.add('ring-2', 'ring-primary');
-                                        setTimeout(() => el.classList.remove('ring-2', 'ring-primary'), 1500);
-                                    }
-                                }}
-                                className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary/20 text-primary border border-primary/20 hover:bg-primary/40 hover:text-white transition-colors cursor-pointer"
-                                title={`Click to scroll to ${usageItem.setName}`}
-                            >
-                                S{usageItem.setNumber}{countSuffix}
-                            </span>
-                        );
-                    })}
-                </div>
-            )}
           </div>
           
           {/* Actions Column */}
-          <div className="flex flex-col gap-2 shrink-0">
+          <div className="flex shrink-0 flex-col items-center gap-2">
                <button 
-                onClick={(e) => { e.stopPropagation(); onAdd(); }}
-                className="p-1.5 rounded-md bg-primary/10 text-primary hover:bg-primary hover:text-white transition-colors border border-primary/20"
-                title={`Add to ${destinationSetName}`}
-                data-no-dnd="true"
-               >
-                   <Icons.Plus size={16} />
-               </button>
-
-               <button 
+                type="button"
+                title="Play Video"
+                onPointerDown={(e) => { e.stopPropagation(); }}
                 onClick={(e) => { e.stopPropagation(); onPlay(); }}
                 className="p-1.5 rounded-md hover:bg-zinc-700 text-zinc-500 hover:text-red-500 transition-colors"
-                title="Play Video"
-                data-no-dnd="true"
                >
                    <Icons.Play size={16} />
                </button>
+
+               <div className="grid grid-cols-2 gap-1">
+                 {sets
+                   .slice()
+                   .sort(
+                     (a, b) =>
+                       Number(a.setNumber ?? 0) -
+                       Number(b.setNumber ?? 0)
+                   )
+                   .map(set => {
+                     const usageList =
+                       Array.isArray(safeUsage[song.id])
+                         ? safeUsage[song.id]
+                         : [];
+
+                     const alreadyInSet =
+                       usageList.some(
+                         item => item.setId === set.id
+                       );
+
+                     return (
+                       <button
+                         key={set.id}
+                         type="button"
+                         disabled={alreadyInSet}
+                         title={
+                           alreadyInSet
+                             ? `Already in Set ${set.setNumber}`
+                             : `Add to Set ${set.setNumber}`
+                         }
+                         onPointerDown={event =>
+                           event.stopPropagation()
+                         }
+                         onClick={event => {
+                           event.stopPropagation();
+
+                           if (!alreadyInSet) {
+                             onAddSongToSet(
+                               song.id,
+                               set.id
+                             );
+                           }
+                         }}
+                         className={
+                           alreadyInSet
+                             ? 'min-w-7 rounded border border-primary/40 bg-primary/25 px-1.5 py-1 text-[10px] font-bold text-primary cursor-default font-mono'
+                             : 'min-w-7 rounded border border-zinc-700 bg-zinc-800 px-1.5 py-1 text-[10px] font-bold text-zinc-300 hover:border-primary/40 hover:bg-primary/20 hover:text-primary font-mono'
+                         }
+                       >
+                         S{set.setNumber}
+                       </button>
+                     );
+                   })}
+               </div>
+
                <button 
+                type="button"
+                title="Details & Edit"
+                onPointerDown={(e) => { e.stopPropagation(); }}
                 onClick={(e) => { e.stopPropagation(); onEdit(); }}
                 className="p-1.5 rounded-md hover:bg-zinc-700 text-zinc-500 hover:text-blue-400 transition-colors"
-                title="Details & Edit"
-                data-no-dnd="true"
                >
                    <Icons.Info size={16} />
                </button>
@@ -419,16 +455,12 @@ export const SongLibrary: React.FC<SongLibraryProps> = ({
             <DraggableLibrarySong 
                 key={song.id} 
                 song={song} 
-                usageList={
-                  Array.isArray(safeUsage[song.id])
-                    ? safeUsage[song.id]
-                    : []
-                }
                 viewOptions={viewOptions}
                 onPlay={() => onPlaySong(song)}
                 onEdit={() => onEditSong(song)}
-                onAdd={() => onAddSongToSet(song, targetSetId)}
-                destinationSetName={targetSetName}
+                onAddSongToSet={onAddSongToSet}
+                sets={sets}
+                safeUsage={safeUsage}
             />
             ))
         )}
