@@ -19,6 +19,12 @@ interface SetListColumnProps {
   onUpdateSetDetails: (setId: string, updates: Partial<SetList>) => void;
   onEditSong: (song: Song) => void;
   onAddSongToSet: (songId: string, setId: string) => void;
+  draggingSetId: string | null;
+  setDraggingSetId: (id: string | null) => void;
+  setDropTargetId: string | null;
+  setSetDropTargetId: (id: string | null) => void;
+  onReorderSets: (draggedSetId: string, targetSetId: string) => void;
+  onRenameSet: (setId: string, name: string) => void;
 }
 
 interface SortableSetSongProps {
@@ -204,33 +210,22 @@ export const SetListColumn: React.FC<SetListColumnProps> = ({
   onPlaySong,
   onUpdateSetDetails,
   onEditSong,
-  onAddSongToSet
+  onAddSongToSet,
+  draggingSetId,
+  setDraggingSetId,
+  setDropTargetId,
+  setSetDropTargetId,
+  onReorderSets,
+  onRenameSet
 }) => {
-  // Sortable Logic for the Column itself
-  const {
-    attributes,
-    listeners,
-    setNodeRef: setSortableRef,
-    transform,
-    transition,
-    isDragging: isColumnDragging
-  } = useSortable({
-    id: setList.id,
-    data: { type: 'SET_COLUMN', data: setList }
-  });
-
-  const style = {
-      transform: CSS.Translate.toString(transform),
-      transition,
-      opacity: isColumnDragging ? 0.5 : 1,
-  };
-
   const { setNodeRef: setDroppableRef } = useDroppable({
     id: setList.id,
     data: { type: 'SET', data: setList }
   });
 
   const [dragOverSetId, setDragOverSetId] = useState<string | null>(null);
+  const [editingSetId, setEditingSetId] = useState<string | null>(null);
+  const [editingSetName, setEditingSetName] = useState('');
 
   const totalDuration = setList.songs.reduce((acc, s) => acc + s.durationSeconds, 0);
 
@@ -245,25 +240,69 @@ export const SetListColumn: React.FC<SetListColumnProps> = ({
   return (
     <div 
         id={`set-col-${setList.id}`}
-        ref={setSortableRef} 
-        style={style} 
         onDragOver={event => {
-          event.preventDefault();
-          event.dataTransfer.dropEffect = 'copy';
+          const types = Array.from(event.dataTransfer.types);
+          const isSetDrag = types.includes('application/x-setlist-set');
+
+          if (isSetDrag) {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'move';
+            setSetDropTargetId(setList.id);
+          } else {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'copy';
+          }
         }}
         onDragEnter={event => {
           event.preventDefault();
-          setDragOverSetId(setList.id);
+          const types = Array.from(event.dataTransfer.types);
+          if (types.includes('application/x-setlist-set')) {
+            setSetDropTargetId(setList.id);
+          } else {
+            setDragOverSetId(setList.id);
+          }
         }}
         onDragLeave={event => {
           if (event.currentTarget === event.target) {
             setDragOverSetId(null);
+          }
+          const types = Array.from(event.dataTransfer.types);
+          if (types.includes('application/x-setlist-set')) {
+            if (setDropTargetId === setList.id) {
+              setSetDropTargetId(null);
+            }
           }
         }}
         onDrop={event => {
           event.preventDefault();
           setDragOverSetId(null);
 
+          const types = Array.from(event.dataTransfer.types);
+          if (types.includes('application/x-setlist-set')) {
+            const raw = event.dataTransfer.getData('application/x-setlist-set');
+            if (!raw) {
+              setSetDropTargetId(null);
+              return;
+            }
+            try {
+              const payload = JSON.parse(raw);
+              if (
+                payload?.source === 'set-header' &&
+                payload?.setId &&
+                payload.setId !== setList.id
+              ) {
+                onReorderSets(payload.setId, setList.id);
+              }
+            } catch (error) {
+              console.error('Set reorder drop failed', error);
+            } finally {
+              setDraggingSetId(null);
+              setSetDropTargetId(null);
+            }
+            return;
+          }
+
+          // Otherwise, it's a song drop
           try {
             const raw = event.dataTransfer.getData('application/x-setlist-song');
 
@@ -285,10 +324,18 @@ export const SetListColumn: React.FC<SetListColumnProps> = ({
             console.error('Library song drop failed', error);
           }
         }}
-        className={`flex flex-col h-full min-w-[320px] max-w-[400px] w-full bg-surface rounded-xl border shadow-xl overflow-hidden relative transition-colors ${
+        className={`flex flex-col h-full min-w-[320px] max-w-[400px] w-full bg-surface rounded-xl border shadow-xl overflow-hidden relative transition-all ${
           dragOverSetId === setList.id
             ? 'border-primary bg-primary/5'
             : 'border-white/5'
+        } ${
+          setDropTargetId === setList.id
+            ? 'ring-2 ring-primary/70'
+            : ''
+        } ${
+          draggingSetId === setList.id
+            ? 'opacity-60'
+            : ''
         }`}
     >
       {/* Set Header */}
@@ -296,8 +343,26 @@ export const SetListColumn: React.FC<SetListColumnProps> = ({
         <div className="flex items-center gap-3 p-3">
             {/* Drag Handle */}
             <div 
-                {...attributes} 
-                {...listeners}
+                draggable
+                onDragStart={event => {
+                  event.stopPropagation();
+
+                  event.dataTransfer.effectAllowed = 'move';
+
+                  event.dataTransfer.setData(
+                    'application/x-setlist-set',
+                    JSON.stringify({
+                      source: 'set-header',
+                      setId: setList.id
+                    })
+                  );
+
+                  setDraggingSetId(setList.id);
+                }}
+                onDragEnd={() => {
+                  setDraggingSetId(null);
+                  setSetDropTargetId(null);
+                }}
                 className="cursor-grab active:cursor-grabbing text-zinc-500 hover:text-zinc-300 p-1 flex-shrink-0"
                 title="Drag to reorder sets"
             >
@@ -309,20 +374,90 @@ export const SetListColumn: React.FC<SetListColumnProps> = ({
                 {setIndex + 1}
             </div>
 
-            {/* Name Input */}
-            <div className="flex-1 min-w-0">
-                <input 
-                    list={`band-members-${setList.id}`}
-                    type="text"
-                    value={setList.name}
-                    onChange={(e) => onUpdateSetDetails(setList.id, { name: e.target.value })}
-                    className="bg-transparent font-bold text-zinc-100 text-lg w-full focus:outline-none focus:border-b border-primary/50 placeholder-zinc-600 px-1 truncate"
-                    placeholder="Set Name"
+            {/* Editable Name Input / Button */}
+            <div className="flex-1 min-w-0 flex items-center gap-1">
+              {editingSetId === setList.id ? (
+                <input
+                  autoFocus
+                  value={editingSetName}
+                  onChange={event =>
+                    setEditingSetName(
+                      event.target.value
+                    )
+                  }
+                  onBlur={() => {
+                    const nextName =
+                      editingSetName.trim();
+
+                    if (nextName) {
+                      onRenameSet(
+                        setList.id,
+                        nextName
+                      );
+                    }
+
+                    setEditingSetId(null);
+                  }}
+                  onKeyDown={event => {
+                    if (event.key === 'Enter') {
+                      event.currentTarget.blur();
+                    }
+
+                    if (event.key === 'Escape') {
+                      setEditingSetName(
+                        setList.name ||
+                        `Set ${setList.setNumber}`
+                      );
+
+                      setEditingSetId(null);
+                    }
+                  }}
+                  onPointerDown={event =>
+                    event.stopPropagation()
+                  }
+                  className="min-w-0 flex-1 rounded border border-primary bg-black/40 px-2 py-1 text-sm font-bold text-white outline-none"
                 />
-                 <datalist id={`band-members-${setList.id}`}>
-                    {bandMembers.map((m, i) => <option key={i} value={m} />)}
-                    <option value={`Set ${setIndex + 1}`} />
-                </datalist>
+              ) : (
+                <button
+                  type="button"
+                  title="Rename set"
+                  onDoubleClick={() => {
+                    setEditingSetId(setList.id);
+                    setEditingSetName(
+                      setList.name ||
+                      `Set ${setList.setNumber}`
+                    );
+                  }}
+                  onClick={event => {
+                    event.stopPropagation();
+                  }}
+                  className="min-w-0 truncate text-left text-base font-bold text-white flex-1 hover:text-zinc-200 transition-colors"
+                >
+                  {setList.name || `Set ${setList.setNumber}`}
+                </button>
+              )}
+
+              {editingSetId !== setList.id && (
+                <button
+                  type="button"
+                  title="Rename set"
+                  onPointerDown={event =>
+                    event.stopPropagation()
+                  }
+                  onClick={event => {
+                    event.stopPropagation();
+
+                    setEditingSetId(setList.id);
+                    setEditingSetName(
+                      setList.name ||
+                      `Set ${setList.setNumber}`
+                    );
+                  }}
+                  className="text-zinc-500 hover:text-white p-1 shrink-0"
+                >
+                  <Icons.Edit size={14} />
+                </button>
+              )}
             </div>
 
             {/* Trash Button - Placed directly in flex flow for reliability */}

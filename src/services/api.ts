@@ -237,7 +237,13 @@ export async function saveState(payload: SaveStatePayload) {
     const stagePrefix = parsed.stage ? `[Stage: ${parsed.stage}] ` : '';
     const codeSuffix = parsed.code ? ` (Code: ${parsed.code})` : '';
     const detailSuffix = parsed.detail ? ` - Detail: ${typeof parsed.detail === 'string' ? parsed.detail : JSON.stringify(parsed.detail)}` : '';
-    throw new Error(`${stagePrefix}${detailedMsg}${codeSuffix}${detailSuffix}`);
+    const errorInstance = new Error(`${stagePrefix}${detailedMsg}${codeSuffix}${detailSuffix}`);
+    (errorInstance as any).stage = parsed.stage || null;
+    (errorInstance as any).code = parsed.code || null;
+    (errorInstance as any).detail = parsed.detail || parsed.error || null;
+    (errorInstance as any).httpStatus = res.status;
+    (errorInstance as any).rawResponse = text;
+    throw errorInstance;
   }
   return parsed;
 }

@@ -601,6 +601,17 @@ export default function App() {
   const [isDirty, setIsDirty] = useState(false);
   const [saveButtonState, setSaveButtonState] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle');
   const [autosaveStatus, setAutosaveStatus] = useState<'saved' | 'saving' | 'unsaved' | 'failed'>('saved');
+  const [autosaveError, setAutosaveError] = useState<{
+    message: string;
+    timestamp: Date;
+    detail?: string | null;
+    code?: string | null;
+    stage?: string | null;
+    httpStatus?: number | null;
+    rawResponse?: string | null;
+  } | null>(null);
+  const [autosaveModalOpen, setAutosaveModalOpen] = useState(false);
+  const [copiedAutosaveDiagnostics, setCopiedAutosaveDiagnostics] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
   const [setupRequired, setSetupRequired] = useState(false);
 
@@ -610,6 +621,8 @@ export default function App() {
   const [creatingGigInProgress, setCreatingGigInProgress] = useState(false);
 
   const [activeDragItem, setActiveDragItem] = useState<any>(null);
+  const [draggingSetId, setDraggingSetId] = useState<string | null>(null);
+  const [setDropTargetId, setSetDropTargetId] = useState<string | null>(null);
   const [showImport, setShowImport] = useState(false);
   const [showGigDetails, setShowGigDetails] = useState(false);
   const [showBandSettings, setShowBandSettings] = useState(false);
@@ -1012,6 +1025,7 @@ export default function App() {
 
         setIsDirty(false);
         setAutosaveStatus('saved');
+        setAutosaveError(null);
         setSaveButtonState('saved');
         setTimeout(() => setSaveButtonState('idle'), 2000);
         return true;
@@ -1021,6 +1035,15 @@ export default function App() {
       console.error('Failed to save state:', err);
       setSaveButtonState('failed');
       setAutosaveStatus('failed');
+      setAutosaveError({
+        message: err.message || 'Unknown save error',
+        timestamp: new Date(),
+        detail: err.detail || null,
+        code: err.code || null,
+        stage: err.stage || null,
+        httpStatus: err.httpStatus || null,
+        rawResponse: err.rawResponse || null
+      });
       setTimeout(() => setSaveButtonState('idle'), 4000);
       return false;
     }
@@ -1884,6 +1907,33 @@ const handleImportSongsMatch = async (
     markDirty();
   };
 
+  const handleReorderSets = (draggedSetId: string, targetSetId: string) => {
+    setSets(currentSets => {
+      const oldIndex = currentSets.findIndex(s => s.id === draggedSetId);
+      const newIndex = currentSets.findIndex(s => s.id === targetSetId);
+      if (oldIndex === -1 || newIndex === -1) { return currentSets; }
+      const items = arrayMove(currentSets, oldIndex, newIndex);
+      return items.map((item, index) => ({
+        ...item,
+        setNumber: index + 1
+      }));
+    });
+    markDirty();
+  };
+
+  const handleRenameSet = (setId: string, nextName: string) => {
+    setSets(currentSets =>
+      currentSets.map(set => {
+        if (set.id !== setId) { return set; }
+        return {
+          ...set,
+          name: nextName
+        };
+      })
+    );
+    markDirty();
+  };
+
   // --- DND HANDLERS ---
   const handleDragStart = (event: DragStartEvent) => {
     const { active } = event;
@@ -2538,7 +2588,11 @@ Deployment ID: ${deploymentId}`;
                   <DatabaseHealthBadge healthResult={databaseHealth} />
 
                   {/* Autosave Status Badge */}
-                  <div className="flex items-center gap-1.5 px-2.5 py-1 bg-black/40 rounded-full border border-white/5 text-[10px] font-medium mr-2">
+                  <button
+                    onClick={() => setAutosaveModalOpen(true)}
+                    className="flex items-center gap-1.5 px-2.5 py-1 bg-black/40 hover:bg-zinc-800/60 rounded-full border border-white/5 hover:border-white/10 text-[10px] font-medium mr-2 transition-all cursor-pointer"
+                    title="Click to view Autosave Status Details & Diagnostics"
+                  >
                     {autosaveStatus === 'saving' && (
                       <>
                         <span className="w-1.5 h-1.5 rounded-full bg-yellow-500 animate-pulse"></span>
@@ -2560,10 +2614,10 @@ Deployment ID: ${deploymentId}`;
                     {autosaveStatus === 'failed' && (
                       <>
                         <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></span>
-                        <span className="text-red-400">Autosave failed</span>
+                        <span className="text-red-400 font-bold">Autosave failed</span>
                       </>
                     )}
-                  </div>
+                  </button>
 
                   <button 
                      onClick={() => setShowBandSettings(true)}
@@ -2637,48 +2691,49 @@ Deployment ID: ${deploymentId}`;
                    onDragEnd={handleDragEnd}
                >
                    <div className="flex-1 flex flex-col bg-[#0c0c0e] relative overflow-hidden">
-                        {/* Horizontal Scroll Area */}
-                        <div className="flex-1 overflow-x-auto overflow-y-hidden p-6 custom-scrollbar">
-                           <SortableContext 
-                               items={sets.map(s => s.id)} 
-                               strategy={horizontalListSortingStrategy}
-                           >
-                               <div className="flex gap-6 h-full min-w-max pb-4">
-                                   {sets.map((set, i) => (
-                                       <SetListColumn 
-                                           key={set.id} 
-                                           setList={set} 
-                                           setIndex={i}
-                                           totalSets={sets.length}
-                                           bandMembers={bandSettings.members}
-                                           duplicateSongIds={duplicateSongIds}
-                                           onRemoveSet={requestRemoveSet}
-                                           onRemoveSong={removeSongFromSet}
-                                           onUpdateNote={updateSongNote}
-                                           onPlaySong={playSong}
-                                           onUpdateSetDetails={updateSetDetails}
-                                           onEditSong={setEditingSong}
-                                           onAddSongToSet={handleAddSongToSet}
-                                       />
-                                   ))}
+                         {/* Horizontal Scroll Area */}
+                         <div className="flex-1 overflow-x-auto overflow-y-hidden p-6 custom-scrollbar">
+                                <div className="flex gap-6 h-full min-w-max pb-4">
+                                    {sets.map((set, i) => (
+                                        <SetListColumn
+                                            key={set.id}
+                                            setList={set}
+                                            setIndex={i}
+                                            totalSets={sets.length}
+                                            bandMembers={bandSettings.members}
+                                            duplicateSongIds={duplicateSongIds}
+                                            onRemoveSet={requestRemoveSet}
+                                            onRemoveSong={removeSongFromSet}
+                                            onUpdateNote={updateSongNote}
+                                            onPlaySong={playSong}
+                                            onUpdateSetDetails={updateSetDetails}
+                                            onEditSong={setEditingSong}
+                                            onAddSongToSet={handleAddSongToSet}
+                                            draggingSetId={draggingSetId}
+                                            setDraggingSetId={setDraggingSetId}
+                                            setDropTargetId={setDropTargetId}
+                                            setSetDropTargetId={setSetDropTargetId}
+                                            onReorderSets={handleReorderSets}
+                                            onRenameSet={handleRenameSet}
+                                        />
+                                    ))}
 
-                                   {/* Add Set Button Area */}
-                                   {sets.length < 5 && (
-                                       <div className="w-[320px] flex items-center justify-center shrink-0">
-                                           <button 
-                                               onClick={addSet}
-                                               className="group flex flex-col items-center justify-center w-full h-[200px] border-2 border-dashed border-zinc-800 hover:border-primary/50 rounded-xl transition-all bg-zinc-900/20 hover:bg-zinc-900/50"
-                                           >
-                                               <div className="w-12 h-12 rounded-full bg-zinc-800 group-hover:bg-primary/20 flex items-center justify-center mb-3 transition-colors">
-                                                   <Icons.Plus size={24} className="text-zinc-500 group-hover:text-primary" />
-                                               </div>
-                                               <span className="text-zinc-500 font-medium group-hover:text-zinc-300">Add New Set</span>
-                                           </button>
-                                       </div>
-                                   )}
-                               </div>
-                           </SortableContext>
-                        </div>
+                                    {/* Add Set Button Area */}
+                                    {sets.length < 5 && (
+                                        <div className="w-[320px] flex items-center justify-center shrink-0">
+                                            <button 
+                                                onClick={addSet}
+                                                className="group flex flex-col items-center justify-center w-full h-[200px] border-2 border-dashed border-zinc-800 hover:border-primary/50 rounded-xl transition-all bg-zinc-900/20 hover:bg-zinc-900/50"
+                                            >
+                                                <div className="w-12 h-12 rounded-full bg-zinc-800 group-hover:bg-primary/20 flex items-center justify-center mb-3 transition-colors">
+                                                    <Icons.Plus size={24} className="text-zinc-500 group-hover:text-primary" />
+                                                </div>
+                                                <span className="text-zinc-500 font-medium group-hover:text-zinc-300">Add New Set</span>
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+                         </div>
 
                         {/* Drag Overlay */}
                         <DragOverlay dropAnimation={dropAnimation}>
@@ -2926,7 +2981,197 @@ Deployment ID: ${deploymentId}`;
            </div>
          )}
 
-         {/* Paste/Import CSV Modal */}
+         {/* Autosave Troubleshooting & Diagnostics Modal */}
+         {autosaveModalOpen && (
+             <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
+                  <div className="bg-zinc-950 border border-zinc-800 rounded-xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col">
+                     {/* Modal Header */}
+                     <div className="p-4 border-b border-zinc-800 bg-zinc-900 flex justify-between items-center shrink-0">
+                         <h3 className="font-semibold text-white flex items-center gap-2 text-xs uppercase tracking-wider">
+                             <Icons.Save size={14} className="text-primary"/>
+                             Autosave Status & Diagnostics
+                         </h3>
+                         <button 
+                           onClick={() => setAutosaveModalOpen(false)}
+                           className="text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                         >
+                           <Icons.Close size={18}/>
+                         </button>
+                     </div>
+                     
+                     {/* Modal Content */}
+                     <div className="p-5 overflow-y-auto space-y-4 max-h-[70vh] custom-scrollbar">
+                         {/* Current Status Panel */}
+                         <div className="p-4 rounded-lg bg-zinc-900/50 border border-zinc-800/80">
+                             <div className="text-xs text-zinc-500 uppercase tracking-wide font-medium">Sync Status</div>
+                             <div className="text-base font-semibold text-white mt-1 flex items-center gap-2">
+                                 {autosaveStatus === 'saving' && (
+                                   <>
+                                     <span className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse" />
+                                     <span className="text-yellow-400">Saving Changes...</span>
+                                   </>
+                                 )}
+                                 {autosaveStatus === 'saved' && (
+                                   <>
+                                     <span className="w-2 h-2 rounded-full bg-green-500" />
+                                     <span className="text-emerald-400 font-bold">Successfully Synced</span>
+                                   </>
+                                 )}
+                                 {autosaveStatus === 'unsaved' && (
+                                   <>
+                                     <span className="w-2 h-2 rounded-full bg-yellow-400" />
+                                     <span className="text-yellow-400">Unsaved Changes Present</span>
+                                   </>
+                                 )}
+                                 {autosaveStatus === 'failed' && (
+                                   <>
+                                     <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                                     <span className="text-red-400 font-bold">Autosave Failed</span>
+                                   </>
+                                 )}
+                             </div>
+                             <p className="text-xs text-zinc-400 mt-1.5 leading-relaxed">
+                                 {autosaveStatus === 'saved' && "All changes are safe in the cloud. We automatically save your gig edits, set lists, band settings, and songs to your Neon PostgreSQL database as you type."}
+                                 {autosaveStatus === 'saving' && "We are currently transmitting your latest modifications to your live Neon PostgreSQL database. This should complete in a few seconds."}
+                                 {autosaveStatus === 'unsaved' && "You have outstanding modifications in your browser. A save operation will trigger shortly, or you can manually save."}
+                                 {autosaveStatus === 'failed' && "Your live database rejected the save. Your changes are temporarily saved in browser state but have NOT been written to Neon. Do not reload or close this tab, or you may lose your changes."}
+                             </p>
+                         </div>
+
+                         {/* Error Details Section (only if failed or has error) */}
+                         {autosaveError && (
+                             <div className="space-y-3">
+                                 <div className="p-4 bg-red-950/20 border border-red-900/30 rounded-lg text-xs leading-relaxed space-y-2">
+                                     <div className="flex items-center gap-1.5 text-red-400 font-semibold uppercase tracking-wider text-[10px]">
+                                         <Icons.Warning size={14} />
+                                         Error Details
+                                     </div>
+                                     <p className="text-red-200 font-medium font-mono text-xs break-words bg-red-950/40 p-2.5 rounded border border-red-900/20 leading-relaxed whitespace-pre-wrap">
+                                         {autosaveError.message}
+                                     </p>
+                                     
+                                     <div className="grid grid-cols-2 gap-2 text-[11px] pt-1 border-t border-red-900/10 font-mono text-zinc-400">
+                                         {autosaveError.httpStatus && (
+                                             <div>
+                                                 <span className="text-zinc-500">HTTP Status:</span> <span className="text-zinc-300 font-medium">{autosaveError.httpStatus}</span>
+                                             </div>
+                                         )}
+                                         {autosaveError.stage && (
+                                             <div>
+                                                 <span className="text-zinc-500">Failing Stage:</span> <span className="text-zinc-300 font-medium">{autosaveError.stage}</span>
+                                             </div>
+                                         )}
+                                         {autosaveError.code && (
+                                             <div>
+                                                 <span className="text-zinc-500">Postgres Code:</span> <span className="text-zinc-300 font-medium">{autosaveError.code}</span>
+                                             </div>
+                                         )}
+                                         {autosaveError.timestamp && (
+                                             <div className="col-span-2">
+                                                 <span className="text-zinc-500">Failed At:</span> <span className="text-zinc-300 font-medium">{autosaveError.timestamp.toLocaleTimeString()} ({autosaveError.timestamp.toLocaleDateString()})</span>
+                                             </div>
+                                         )}
+                                     </div>
+
+                                     {autosaveError.detail && (
+                                         <div className="pt-2 border-t border-red-900/10 text-[11px] text-zinc-400">
+                                             <span className="text-zinc-500 block mb-0.5">DB Constraint Detail:</span>
+                                             <p className="bg-zinc-950 p-2 rounded border border-white/5 font-mono text-zinc-300 break-words max-h-[100px] overflow-y-auto custom-scrollbar">
+                                                 {typeof autosaveError.detail === 'string' ? autosaveError.detail : JSON.stringify(autosaveError.detail, null, 2)}
+                                             </p>
+                                         </div>
+                                     )}
+
+                                     {autosaveError.rawResponse && autosaveError.rawResponse.trim() !== '' && !autosaveError.rawResponse.startsWith('{') && (
+                                         <div className="pt-2 border-t border-red-900/10 text-[11px] text-zinc-400">
+                                             <span className="text-zinc-500 block mb-0.5">Raw Server Response:</span>
+                                             <pre className="bg-zinc-950 p-2 rounded border border-white/5 font-mono text-[10px] text-zinc-300 overflow-x-auto max-h-[100px] overflow-y-auto custom-scrollbar whitespace-pre-wrap select-all">
+                                                 {autosaveError.rawResponse}
+                                             </pre>
+                                         </div>
+                                     )}
+                                 </div>
+                             </div>
+                         )}
+
+                         {/* Troubleshooting checklist */}
+                         <div className="p-4 bg-zinc-900/30 border border-zinc-800 rounded-lg text-xs space-y-2.5">
+                             <h4 className="font-semibold text-zinc-300 flex items-center gap-1.5 uppercase tracking-wider text-[10px]">
+                                 <Icons.Info size={12} className="text-primary" />
+                                 Autosave Troubleshooting Checklist
+                             </h4>
+                             <ul className="space-y-2 text-zinc-400 list-disc pl-4 leading-relaxed">
+                                 <li>
+                                     <strong className="text-zinc-300">Verify Database Connectivity:</strong> Ensure that the database status badge is green. If the DB connection is broken, autosave will fail.
+                                 </li>
+                                 <li>
+                                      <strong className="text-zinc-300">Foreign Key & Constraint Errors:</strong> If the error mentions constraints or missing parents (e.g. <code>violates foreign key constraint</code>), verify you have a valid active Gig selected and you are not adding a song with invalid values.
+                                 </li>
+                                 <li>
+                                     <strong className="text-zinc-300">Schema Sync status:</strong> If database schema updates are pending, or if database tables are out of sync with the application code, the server won't accept the saved payload structure.
+                                 </li>
+                                 <li>
+                                     <strong className="text-zinc-300">Vercel Serverless Limits:</strong> Free-tier database connections or platform request size/timeout limits might prevent the save handler from completing. Clicking <strong className="text-zinc-300">Force Retry Save</strong> might establish a fresh connection.
+                                 </li>
+                             </ul>
+                         </div>
+                     </div>
+
+                     {/* Modal Footer Controls */}
+                     <div className="flex gap-3 px-5 py-4 bg-zinc-900 border-t border-zinc-800 justify-end shrink-0">
+                         <button
+                           onClick={() => {
+                             const text = [
+                               `Autosave Diagnostics Report`,
+                               `Status: \${autosaveStatus}`,
+                               `Last Attempted At: \${autosaveError?.timestamp ? autosaveError.timestamp.toLocaleString() : 'N/A'}`,
+                               `Error Message: \${autosaveError?.message || 'None'}`,
+                               `HTTP Status: \${autosaveError?.httpStatus || 'N/A'}`,
+                               `Failing Stage: \${autosaveError?.stage || 'N/A'}`,
+                               `Error Code: \${autosaveError?.code || 'N/A'}`,
+                               `Error Details: \${autosaveError?.detail || 'None'}`,
+                               `Raw Response: \${autosaveError?.rawResponse || 'None'}`
+                             ].join('\n');
+                             
+                             navigator.clipboard.writeText(text).then(() => {
+                               setCopiedAutosaveDiagnostics(true);
+                               setTimeout(() => setCopiedAutosaveDiagnostics(false), 2000);
+                             });
+                           }}
+                           disabled={autosaveStatus === 'saving'}
+                           className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-zinc-300 hover:text-white rounded text-xs font-semibold transition-all cursor-pointer"
+                         >
+                           {copiedAutosaveDiagnostics ? (
+                             <>
+                               <Icons.Check size={12} className="text-emerald-400" />
+                               <span>Copied Report!</span>
+                             </>
+                           ) : (
+                             <>
+                               <Icons.Copy size={12} />
+                               <span>Copy Diagnostics</span>
+                             </>
+                           )}
+                         </button>
+                         <button
+                           onClick={async () => {
+                             setAutosaveStatus('saving');
+                             const success = await saveChanges();
+                             if (success) {
+                               setAutosaveModalOpen(false);
+                             }
+                           }}
+                           disabled={autosaveStatus === 'saving'}
+                           className="flex items-center gap-1.5 px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-900 disabled:opacity-60 text-white rounded text-xs font-semibold transition-all cursor-pointer"
+                         >
+                           <Icons.Refresh size={12} className={autosaveStatus === 'saving' ? 'animate-spin' : ''} />
+                           {autosaveStatus === 'saving' ? 'Saving...' : 'Force Retry Save'}
+                         </button>
+                     </div>
+                 </div>
+             </div>
+         )}
+\n         {/* Paste/Import CSV Modal */}
          {showImport && (
              <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
                   <div className="bg-surface border border-white/10 rounded-xl shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[90vh]">
