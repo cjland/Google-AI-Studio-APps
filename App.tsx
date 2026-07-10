@@ -3123,14 +3123,14 @@ Deployment ID: ${deploymentId}`;
                            onClick={() => {
                              const text = [
                                `Autosave Diagnostics Report`,
-                               `Status: \${autosaveStatus}`,
-                               `Last Attempted At: \${autosaveError?.timestamp ? autosaveError.timestamp.toLocaleString() : 'N/A'}`,
-                               `Error Message: \${autosaveError?.message || 'None'}`,
-                               `HTTP Status: \${autosaveError?.httpStatus || 'N/A'}`,
-                               `Failing Stage: \${autosaveError?.stage || 'N/A'}`,
-                               `Error Code: \${autosaveError?.code || 'N/A'}`,
-                               `Error Details: \${autosaveError?.detail || 'None'}`,
-                               `Raw Response: \${autosaveError?.rawResponse || 'None'}`
+                               `Status: ${autosaveStatus}`,
+                               `Last Attempted At: ${autosaveError?.timestamp ? autosaveError.timestamp.toLocaleString() : 'N/A'}`,
+                               `Error Message: ${autosaveError?.message || 'None'}`,
+                               `HTTP Status: ${autosaveError?.httpStatus || 'N/A'}`,
+                               `Failing Stage: ${autosaveError?.stage || 'N/A'}`,
+                               `Error Code: ${autosaveError?.code || 'N/A'}`,
+                               `Error Details: ${autosaveError?.detail ? (typeof autosaveError.detail === 'string' ? autosaveError.detail : JSON.stringify(autosaveError.detail)) : 'None'}`,
+                               `Raw Response: ${autosaveError?.rawResponse || 'None'}`
                              ].join('\n');
                              
                              navigator.clipboard.writeText(text).then(() => {
