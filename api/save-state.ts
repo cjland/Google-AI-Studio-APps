@@ -377,24 +377,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       dbSongs.push(mapSong(sRes.rows[0]));
     }
 
-    // 6. Delete placements/sets removed from submitted sets/gig
+    // 6. Delete all existing placements for the active sets to avoid (set_id, position) unique constraint violations on reorders/updates
     stage = 'delete-removed-songs';
     currentStage = 'delete-removed-songs';
     if (activeSetIds.length > 0) {
-      if (activePlacementIds.length > 0) {
-        await client.query(
-          `DELETE FROM set_songs 
-           WHERE set_id = ANY($1) 
-             AND id <> ALL($2)`,
-          [activeSetIds, activePlacementIds]
-        );
-      } else {
-        await client.query(
-          `DELETE FROM set_songs 
-           WHERE set_id = ANY($1)`,
-          [activeSetIds]
-        );
-      }
+      await client.query(
+        `DELETE FROM set_songs 
+         WHERE set_id = ANY($1)`,
+        [activeSetIds]
+      );
     }
 
     if (activeSetIds.length > 0) {
